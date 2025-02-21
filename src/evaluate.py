@@ -84,17 +84,18 @@ with torch.no_grad():
                             else:
                                 bbox_better = position_xywh_bbox2[_i][_j]
                             
-                            bbox_better = bbox_better[:4].cpu().numpy().flatten()
-                            bbox_better[0], bbox_better[1], bbox_better[2], bbox_better[3] = cx_cy_to_corners(*bbox_better)
-                            position = bbox_better * np.array([model.w, model.h, model.w, model.h])
-                            position = position.astype(np.int32)
-                            # 保证 image 内存连续
-                            image = np.ascontiguousarray(images[_b].cpu().numpy().transpose(1, 2, 0).astype(np.uint8))
-                            # 绘制矩形框
-                            image = cv2.rectangle(image, (position[0], position[1]), (position[2], position[3]), (255, 25*_b, 255), 2)
+                            if bbox_better[4] > 0.8:
+                                bbox_better = bbox_better[:4].cpu().numpy().flatten()
+                                bbox_better[0], bbox_better[1], bbox_better[2], bbox_better[3] = cx_cy_to_corners(*bbox_better)
+                                position = bbox_better * np.array([model.w, model.h, model.w, model.h])
+                                position = position.astype(np.int32)
+                                # 保证 image 内存连续
+                                image = np.ascontiguousarray(images[_b].cpu().numpy().transpose(1, 2, 0).astype(np.uint8))
+                                # 绘制矩形框
+                                image = cv2.rectangle(image, (position[0], position[1]), (position[2], position[3]), (255, 25*_b, 255), 2)
 
-                            plt.imshow(image)
-                            plt.show()
+                                plt.imshow(image)
+                                plt.show()
                         
 
 
