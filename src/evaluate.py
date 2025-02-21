@@ -78,7 +78,7 @@ with torch.no_grad():
             for _c in range(model.C):
                 for _i in range(len(position_class[1])):
                     for _j in range(len(position_class[2])):
-                        if position_class[_i][_j][_c] >0.5:
+                        if position_class[_i][_j][_c] >0.8:
                             if position_xywh_bbox1[_i][_j][4] > position_xywh_bbox2[_i][_j][4]:
                                 bbox_better = position_xywh_bbox1[_i][_j]
                             else:

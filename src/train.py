@@ -163,7 +163,7 @@ def yolo_accuracy(predictions, targets, C=20):
         accuracy: 针对存在目标的格子的分类准确率，介于0~1之间
     """
     # 掩码：判断哪些格子存在目标（使用 targets[..., 4] > 0 判定）
-    obj_mask = targets[..., 4] > 0  # 形状 (batch_size, S, S)
+    obj_mask = targets[..., C+4] > 0  # 形状 (batch_size, S, S)
     
     # 如果没有目标，则返回 0 准确率
     if obj_mask.sum() == 0:
@@ -195,11 +195,12 @@ def yolo_accuracy(predictions, targets, C=20):
 
 if __name__ == "__main__":
 
-    train_dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=1, transform=None, target_transform=None)
-    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
+
+    train_dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=2, transform=None, target_transform=None)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0)
     data = train_dataset[0]
     # print(data[0].shape, data[1].shape)         
-    data_size = data[0].shape
+    data_size = data[1].shape
     model = TotalModel(S=7, B=2, C=5, w=data_size[2], h=data_size[1])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -208,12 +209,17 @@ if __name__ == "__main__":
 
     total_loss = []
     total_acc = []
-    num_epochs = 15
+    num_epochs = 30
 
     # patience = 3         # 容忍连续多少个 epoch 损失不降
     # min_delta = 0.001    # 损失需要下降的最小改变量
     # best_loss = float('inf')
     # epochs_no_improve = 0
+
+    test = yolo_loss_func(data[1], data[1], S=model.S, B=model.B, C=model.C)
+    print(test)
+    test2 = yolo_accuracy(data[1], data[1], C=model.C)
+    print(test2)
 
     for epoch in tqdm(range(num_epochs), desc="Epochs"):
         loss_per_epoch = 0.0
