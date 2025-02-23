@@ -63,7 +63,8 @@ with torch.no_grad():
     for images, labels in tqdm(test_loader):
         images = images.to(device, dtype=torch.float32)
         labels = labels.to(device, dtype=torch.float)
-        output = model(images)
+        output = labels
+        # output = model(images)
 
         loss = yolo_loss_func(output, labels, model.S, model.C, model.B)
         total_loss.append(loss.item())
@@ -74,17 +75,17 @@ with torch.no_grad():
         for _b in range(len(images)):
             position_class = output[_b,:,:,:5]
             position_xywh_bbox1 = output[_b,:,:,5:10]
-            position_xywh_bbox2 = output[_b,:,:,10:15]
-            for _c in range(model.C):
-                for _i in range(len(position_class[1])):
-                    for _j in range(len(position_class[2])):
-                        if position_class[_i][_j][_c] >0.8:
+            position_xywh_bbox2 = output[_b,:,:,10:15]           
+            for _i in range(position_class.shape[0]):
+                for _j in range(position_class.shape[1]):
+                    for _c in range(model.C):
+                        if position_class[_i][_j][_c] >0.3:
                             if position_xywh_bbox1[_i][_j][4] > position_xywh_bbox2[_i][_j][4]:
                                 bbox_better = position_xywh_bbox1[_i][_j]
                             else:
                                 bbox_better = position_xywh_bbox2[_i][_j]
                             
-                            if bbox_better[4] > 0.8:
+                            if bbox_better[4] > 0.3:
                                 bbox_better = bbox_better[:4].cpu().numpy().flatten()
                                 bbox_better[0], bbox_better[1], bbox_better[2], bbox_better[3] = cx_cy_to_corners(*bbox_better)
                                 position = bbox_better * np.array([model.w, model.h, model.w, model.h])

@@ -200,7 +200,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0)
     data = train_dataset[0]
     # print(data[0].shape, data[1].shape)         
-    data_size = data[1].shape
+    data_size = data[0].shape # (3, h, w)
     model = TotalModel(S=7, B=2, C=5, w=data_size[2], h=data_size[1])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     total_loss = []
     total_acc = []
-    num_epochs = 30
+    num_epochs = 1
 
     # patience = 3         # 容忍连续多少个 epoch 损失不降
     # min_delta = 0.001    # 损失需要下降的最小改变量
