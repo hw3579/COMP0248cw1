@@ -91,6 +91,17 @@ def segmentation_to_yolo(label, S=7, num_classes=20, B=2, scale=1):
     # 转换回 torch.Tensor
     return torch.from_numpy(yolo_label)
 
+def check_binary(matrix: torch.Tensor) -> bool:
+    """
+    检查输入的矩阵是否只包含 0 和 1
+
+    参数：
+        matrix (torch.Tensor): 输入张量
+
+    返回：
+        bool: 如果只包含0和1返回True，否则返回False
+    """
+    return torch.all((matrix == 0) | (matrix == 1)).item()
 
 if __name__ == '__main__':
     test_dataset = Comp0249Dataset('data/CamVid', "train")
