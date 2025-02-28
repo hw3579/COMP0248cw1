@@ -25,7 +25,7 @@ model.to(device)
 
 #load test data
 test_dataset = Comp0249DatasetYolo('data/CamVid', "val", scale=1, transform=None, target_transform=None)
-test_loader = DataLoader(test_dataset, batch_size=8, shuffle=True, num_workers=0)
+test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=0)
 
 is_plot = True
 
@@ -59,6 +59,18 @@ is_plot = True
 #             plt.show()
 import cv2
 import numpy as np
+
+
+selected_classes = {
+    "Car": 1,
+    "Pedestrian": 2,
+    "Bicyclist": 3,
+    "MotorcycleScooter": 4,
+    "Truck_Bus": 5
+}
+# 将 selected_classes 反转：数字 -> 类别名称
+rev_selected_classes = {v: k for k, v in selected_classes.items()}
+
 with torch.no_grad():
     for images, labels in tqdm(test_loader):
         images = images.to(device, dtype=torch.float32)
@@ -66,7 +78,7 @@ with torch.no_grad():
         # output = labels
         output = model(images)
 
-        loss = yolo_loss_func(output, labels, model.S, model.C, model.B)
+        loss = yolo_loss_func(output, labels, model.S, model.B, model.C)
         total_loss.append(loss.item())
         batch_acc = yolo_accuracy(output, labels, C=model.C)
         total_acc.append(batch_acc.item())
@@ -75,7 +87,8 @@ with torch.no_grad():
         for _b in range(len(images)):
             position_class = output[_b,:,:,:5]
             position_xywh_bbox1 = output[_b,:,:,5:10]
-            position_xywh_bbox2 = output[_b,:,:,10:15]           
+            position_xywh_bbox2 = output[_b,:,:,10:15]  
+            image = None         
             for _i in range(position_class.shape[0]):
                 for _j in range(position_class.shape[1]):
                     for _c in range(model.C):
@@ -85,7 +98,7 @@ with torch.no_grad():
                             else:
                                 bbox_better = position_xywh_bbox2[_i][_j]
                             
-                            if bbox_better[4] > 0.1:
+                            if bbox_better[4] > 0.5:
                                 bbox_better = bbox_better[:4].cpu().numpy().flatten()
                                 bbox_better[0], bbox_better[1], bbox_better[2], bbox_better[3] = cx_cy_to_corners(*bbox_better)
                                 position = bbox_better * np.array([model.w, model.h, model.w, model.h])
@@ -93,10 +106,19 @@ with torch.no_grad():
                                 # 保证 image 内存连续
                                 image = np.ascontiguousarray(images[_b].cpu().numpy().transpose(1, 2, 0).astype(np.uint8))
                                 # 绘制矩形框
-                                image = cv2.rectangle(image, (position[0], position[1]), (position[2], position[3]), (255, 25*_b, 255), 2)
+                                image = cv2.rectangle(image, (position[0], position[1]), (position[2], position[3]), (255, 25*_c, 255), 2)
+                                # 添加文字（例如：“目标”或者你需要的类别信息）
+                                font = cv2.FONT_HERSHEY_SIMPLEX
+                                class_id = _c + 1
+                                text = rev_selected_classes.get(class_id, f"id:{class_id}")  # 如果找不到，就显示 id
 
-                                plt.imshow(image)
-                                plt.show()
+                                # 将文字放置在矩形框上方，如果超出边界，则放在矩形框内部
+                                text_position = (position[0], position[1] - 10 if position[1] - 10 > 0 else position[1] + 20)
+                                image = cv2.putText(image, text, text_position, font, 0.5, (255, 25*_b, 255), 2)
+
+            if image is not None:
+                plt.imshow(image)
+                plt.show()
                         
 
 

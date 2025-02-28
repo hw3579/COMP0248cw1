@@ -246,8 +246,8 @@ def yolo_accuracy(predictions, targets, C=20):
 if __name__ == "__main__":
 
 
-    train_dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=1, transform=None, target_transform=None)
-    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
+    train_dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=2, transform=None, target_transform=None)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=0)
     data = train_dataset[0]
     # print(data[0].shape, data[1].shape)    
     image_size = data[0].shape # (3, h, w)     
@@ -264,7 +264,7 @@ if __name__ == "__main__":
 
     total_loss = []
     total_acc = []
-    num_epochs = 10
+    num_epochs = 100
 
     # patience = 3         # 容忍连续多少个 epoch 损失不降
     # min_delta = 0.001    # 损失需要下降的最小改变量

@@ -8,3 +8,6 @@ results/
 src/__pycache__/
 
 extension/
+
+# 一些临时文件
+*.pth

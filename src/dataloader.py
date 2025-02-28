@@ -45,7 +45,7 @@ class Comp0249Dataset(Dataset):
             is_filter_classes - whether to filter the classes to only the ones we are interested in
 
     '''
-    def __init__(self, dir: str, classes: str, transform=None, target_transform=None, is_filter_classes=True):
+    def __init__(self, dir: str, classes: str, scale=1, transform=None, target_transform=None, is_filter_classes=True):
         
         self.dir = os.path.join(dir, classes)
         self.dir_labels = os.path.join(dir, classes + '_labels')
@@ -60,6 +60,7 @@ class Comp0249Dataset(Dataset):
         self.images = list(sorted(os.listdir(self.dir)))
         self.images_labels = list(sorted(os.listdir(self.dir_labels)))
 
+        self.scale = scale
         self.transform = transform
         self.target_transform = target_transform
 
@@ -86,7 +87,7 @@ class Comp0249Dataset(Dataset):
 
         # smaller image for faster training (1/10) 720x960 -> 72x96
         _, h, w = image.shape
-        resize = transforms.Resize((h // 8, w // 8))
+        resize = transforms.Resize((h // self.scale, w // self.scale))
         image = resize(image)
         label = resize(label)
         _, h, w = image.shape
@@ -253,16 +254,16 @@ def draw_the_yolo_label(image, yolo_label):
     return image
 
 if __name__ == '__main__':
-    # dataset = Comp0249Dataset('data/CamVid', "train")
-    # dataset.getitem(0)
-    # # print(dataset[0])
-    # ax, pl = plt.subplots(1, 2)
-    # pl[0].imshow(dataset[0][0].permute(1, 2, 0))
-    # pl[1].imshow(dataset[0][1], cmap='gray')
+    dataset = Comp0249Dataset('data/CamVid', "train", scale=1)
+    dataset.getitem(0)
+    # print(dataset[0])
+    ax, pl = plt.subplots(1, 2)
+    pl[0].imshow(dataset[0][0].permute(1, 2, 0))
+    pl[1].imshow(dataset[0][1], cmap='gray')
 
-    # plt.show()
+    plt.show()
 
-    dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=5)
+    dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=1)
     dataset.getitem(0)
     # print(dataset[0])
     ax, pl = plt.subplots(1, 2)
