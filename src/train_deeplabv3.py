@@ -254,7 +254,7 @@ def compute_iou(pred, labels, num_classes=6):
         union = ((pred == cls) | (labels == cls)).float().sum()
 
         if union == 0:
-            iou = float('nan')  # 该类在两幅图中都不存在
+            iou = torch.tensor(float('nan'))  # 该类在两幅图中都不存在
         else:
             iou = intersection / union
         
@@ -282,7 +282,7 @@ if __name__ == "__main__":
     # backbone_test()
     # aspp_test()
     # deeplabv3plus_test()
-    # test_compute_iou()
+    #test_compute_iou()
 
 
     # start training
@@ -298,7 +298,7 @@ if __name__ == "__main__":
 
     total_loss = []
     total_acc = []
-    num_epochs = 1
+    num_epochs = 150
 
     criterion = nn.CrossEntropyLoss()  # 默认会忽略不合法类别
 
