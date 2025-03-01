@@ -303,7 +303,7 @@ import math
 if __name__ == '__main__':
     # test_ResUnit() # 1, 32, 416, 416
     # test_ResUnitX() # 1, 64, 208, 208
-    test_Yolov3() # 1, 5, 13, 13
+    # test_Yolov3() # 1, 5, 13, 13
 
     # 960, 720 -> 30, 23 & 60, 45 & 120, 90
 
@@ -329,7 +329,7 @@ if __name__ == '__main__':
 
     total_loss = []
     total_acc = []
-    num_epochs = 3
+    num_epochs = 400
 
     # patience = 3         # 容忍连续多少个 epoch 损失不降
     # min_delta = 0.001    # 损失需要下降的最小改变量
@@ -383,6 +383,8 @@ if __name__ == '__main__':
         #     print("Early stopping triggered.")
         #     break
 
+        if loss_per_epoch < 0.1:
+            break
 
 
     # 保存模型及训练指标
