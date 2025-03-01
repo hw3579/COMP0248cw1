@@ -15,6 +15,7 @@ import os
 import pandas as pd
 
 from utils import segmentation_to_yolo
+from utils import segmentation_to_yolov3
 # print('Using PyTorch version:', torch.__version__)
 # if torch.cuda.is_available():
 #     print('Using GPU, device name:', torch.cuda.get_device_name(0))
@@ -128,7 +129,7 @@ class Comp0249DatasetYolo(Dataset):
             is_filter_classes - whether to filter the classes to only the ones we are interested in
 
     '''
-    def __init__(self, dir: str, classes: str, scale = 1, transform=None, target_transform=None, is_filter_classes=True):
+    def __init__(self, dir: str, classes: str, scale = 1, transform=None, target_transform=None, is_filter_classes=True, version=1):
 
         self.dir = os.path.join(dir, classes)
         self.dir_labels = os.path.join(dir, classes + '_labels')
@@ -147,6 +148,7 @@ class Comp0249DatasetYolo(Dataset):
         self.scale = scale
         self.transform = transform
         self.target_transform = target_transform
+        self.version = version
 
 
 
@@ -192,7 +194,10 @@ class Comp0249DatasetYolo(Dataset):
         if self.target_transform:
             label = self.target_transform(label)
         
-        yolo_label = segmentation_to_yolo(label_gray, S=7, num_classes=5, B=2, scale=self.scale)
+        if self.version == 1:
+            yolo_label = segmentation_to_yolo(label_gray, S=7, num_classes=5, B=2, scale=self.scale)
+        elif self.version == 3:
+            yolo_label = segmentation_to_yolov3(label_gray, w, h, num_classes=5, B=2, scale=self.scale)
 
         return image, yolo_label
 
@@ -254,21 +259,31 @@ def draw_the_yolo_label(image, yolo_label):
     return image
 
 if __name__ == '__main__':
-    dataset = Comp0249Dataset('data/CamVid', "train", scale=1)
-    dataset.getitem(0)
-    # print(dataset[0])
-    ax, pl = plt.subplots(1, 2)
-    pl[0].imshow(dataset[0][0].permute(1, 2, 0))
-    pl[1].imshow(dataset[0][1], cmap='gray')
+    # dataset = Comp0249Dataset('data/CamVid', "train", scale=1)
+    # dataset.getitem(0)
+    # # print(dataset[0])
+    # ax, pl = plt.subplots(1, 2)
+    # pl[0].imshow(dataset[0][0].permute(1, 2, 0))
+    # pl[1].imshow(dataset[0][1], cmap='gray')
 
-    plt.show()
+    # plt.show()
 
-    dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=1)
+    # dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=1)
+    # dataset.getitem(0)
+    # # print(dataset[0])
+    # ax, pl = plt.subplots(1, 2)
+    # image = dataset[0][0].permute(1, 2, 0)
+    # label = dataset[0][1]
+    # pl[0].imshow(image)
+    # pl[1].imshow(draw_the_yolo_label(image, label))
+    # plt.show()
+
+    dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=1, version=3)
     dataset.getitem(0)
     # print(dataset[0])
     ax, pl = plt.subplots(1, 2)
     image = dataset[0][0].permute(1, 2, 0)
-    label = dataset[0][1]
+    label = dataset[0][1][0]
     pl[0].imshow(image)
     pl[1].imshow(draw_the_yolo_label(image, label))
     plt.show()

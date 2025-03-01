@@ -3,7 +3,8 @@ import torch
 import train
 from train import TotalModel
 import os
+from train_deeplabv3 import TotalDeepLabV3Plus, Backbone, ASPP, Bottleneck, DeepLabV3PlusDecoder
 
-model = torch.load('results/full_model.pth', weights_only=False)
-model = "results/full_model.pth"
+# Load the model
+model = "results/deeplabmodelfull.pth"
 netron.start(model) # serve on localhost:9999
