@@ -155,6 +155,7 @@ def test_Yolov3():
     print(y1.shape, y2.shape, y3.shape)
 
 from train import bbox_iou
+
 def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=5, lambda_noobj=0.5):
     """
     YOLO 损失函数计算（支持 batch 维度）
@@ -301,6 +302,7 @@ def yolo_accuracy_v3(pred, target, C=20):
    
 
 import math
+from torch.amp import autocast, GradScaler
 if __name__ == '__main__':
     # test_ResUnit() # 1, 32, 416, 416
     # test_ResUnitX() # 1, 64, 208, 208
@@ -309,8 +311,16 @@ if __name__ == '__main__':
     # 960, 720 -> 30, 23 & 60, 45 & 120, 90
 
 
+    is_use_autoscale = True
+
     train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=0)
+
+    if is_use_autoscale:
+        train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=6, pin_memory=True, persistent_workers=True)
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
+
+
     data = train_dataset[0]
     # print(data[0].shape, data[1].shape)    
     image_size = data[0].shape # (3, h, w)  
@@ -332,6 +342,8 @@ if __name__ == '__main__':
     total_acc = []
     num_epochs = 400
 
+    if is_use_autoscale:
+        scaler = GradScaler()
     # patience = 3         # 容忍连续多少个 epoch 损失不降
     # min_delta = 0.001    # 损失需要下降的最小改变量
     # best_loss = float('inf')
@@ -352,14 +364,28 @@ if __name__ == '__main__':
                 labels[i] = labels[i].to(device, dtype=torch.float)
 
             optimizer.zero_grad()
+            
+            if is_use_autoscale:
+                with autocast(device_type=str(device)):
+                    # 计算预测结果
+                    pred = model(images)
+                    # pred = labels
 
-            # 计算预测结果
-            pred = model(images)
-            # pred = labels
+                    loss = yolo_loss_funcv3(pred, labels, w/32, h/32, C=5)
 
-            loss = yolo_loss_funcv3(pred, labels, w/32, h/32, C=5)
-            loss.backward()
-            optimizer.step()
+                    # 使用scaler缩放损失并执行反向传播
+                    scaler.scale(loss).backward()
+                    # 使用scaler更新权重
+                    scaler.step(optimizer)
+                    # 为下一次迭代更新scaler
+                    scaler.update()
+            else:
+                pred = model(images)
+                # pred = labels
+
+                loss = yolo_loss_funcv3(pred, labels, w/32, h/32, C=5)
+                loss.backward()
+                optimizer.step()
 
             loss_per_epoch += loss.item()
 

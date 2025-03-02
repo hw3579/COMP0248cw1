@@ -44,8 +44,8 @@ with torch.no_grad():
         images = images.to(device, dtype=torch.float32)
         for i in range(len(labels)):
             labels[i] = labels[i].to(device, dtype=torch.float32)
-        outputs = labels
-        # outputs = model(images)
+        # outputs = labels
+        outputs = model(images)
 
         loss = yolo_loss_funcv3(outputs, labels, w/32, h/32, C=5)
         total_loss.append(loss.item())

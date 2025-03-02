@@ -78,7 +78,7 @@ def segmentation_to_yolo(label, S=7, num_classes=20, B=2, scale=1):
         class_id = np.bincount(region_flat).argmax()
 
 
-        # 确定目标中心所在的网格单元
+        # 确定目标中心所在的网格单元[0-(S-1)]
         grid_x = int(norm_cx * S)
         grid_y = int(norm_cy * S)
         grid_x = min(grid_x, S - 1)
@@ -86,7 +86,12 @@ def segmentation_to_yolo(label, S=7, num_classes=20, B=2, scale=1):
 
         # 设置该网格单元的类别信息与边框信息（这里只填充第一个边框，后续边框保持0）
         yolo_label[grid_y, grid_x, class_id - 1] = 1
-        yolo_label[grid_y, grid_x, num_classes:num_classes+5] = np.array([norm_cx, norm_cy, norm_w, norm_h, 1.0], dtype=np.float32)
+        # 计算相对于网格的偏移量
+        rel_cx = norm_cx * S - grid_x  # x偏移，范围[0,1]
+        rel_cy = norm_cy * S - grid_y  # y偏移，范围[0,1]
+
+        # 存储相对坐标
+        yolo_label[grid_y, grid_x, num_classes:num_classes+5] = np.array([rel_cx, rel_cy, norm_w, norm_h, 1.0], dtype=np.float32)
 
     # 转换回 torch.Tensor
     return torch.from_numpy(yolo_label)
@@ -142,7 +147,13 @@ def segmentation_to_yolov3_1(label, Sx, Sy, num_classes=20, B=2, scale=1): # 重
 
         # 设置该网格单元的类别信息与边框信息（这里只填充第一个边框，后续边框保持0）
         yolo_label[grid_y, grid_x, class_id - 1] = 1
-        yolo_label[grid_y, grid_x, num_classes:num_classes+5] = np.array([norm_cx, norm_cy, norm_w, norm_h, 1.0], dtype=np.float32)
+        # 在segmentation_to_yolov3_1函数中添加相对偏移计算
+        # 计算相对于网格的偏移量
+        rel_cx = norm_cx * Sx - grid_x  # x偏移，范围[0,1]
+        rel_cy = norm_cy * Sy - grid_y  # y偏移，范围[0,1]
+        
+        # 存储相对坐标
+        yolo_label[grid_y, grid_x, num_classes:num_classes+5] = np.array([rel_cx, rel_cy, norm_w, norm_h, 1.0], dtype=np.float32)
 
     # 转换回 torch.Tensor
     return torch.from_numpy(yolo_label)

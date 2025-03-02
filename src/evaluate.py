@@ -29,34 +29,6 @@ test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=
 
 is_plot = True
 
-# with torch.no_grad():
-#     for images, labels in tqdm(test_loader):
-#         images = images.to(device, dtype=torch.float32)
-#         labels = labels.to(device, dtype=torch.long)
-#         output = model(images)
-#         loss = segmentation_loss(output, labels)
-#         total_loss.append(loss.item())
-#         pred_labels = torch.argmax(output, dim=1)
-#         batch_acc = (pred_labels == labels).float().mean()
-#         total_acc.append(batch_acc.item())
-#         if is_plot:
-#             import matplotlib.pyplot as plt
-#             plt.figure(figsize=(10, 5))
-#             plt.subplot(1, 4, 1)
-#             show_image = images[0].cpu().numpy().transpose(1, 2, 0).astype(np.uint8)
-#             labels = labels.cpu().numpy()
-#             pred_labels = pred_labels.cpu().numpy()
-#             plt.imshow(draw_the_box(show_image, labels[0]))
-#             plt.title('Input Image')
-#             plt.subplot(1, 4, 2)
-#             plt.imshow(labels[0], cmap='gray')
-#             plt.title('Ground Truth')
-#             plt.subplot(1, 4, 3)
-#             plt.imshow(pred_labels[0], cmap='gray')
-#             plt.title('Prediction')
-#             plt.subplot(1, 4, 4)
-#             plt.imshow(draw_the_box(show_image, pred_labels[0]))
-#             plt.show()
 import cv2
 import numpy as np
 
@@ -75,8 +47,8 @@ with torch.no_grad():
     for images, labels in tqdm(test_loader):
         images = images.to(device, dtype=torch.float32)
         labels = labels.to(device, dtype=torch.float)
-        # output = labels
-        output = model(images)
+        output = labels
+        # output = model(images)
 
         loss = yolo_loss_func(output, labels, model.S, model.B, model.C)
         total_loss.append(loss.item())
@@ -100,6 +72,11 @@ with torch.no_grad():
                             
                             if bbox_better[4] > 0.5:
                                 bbox_better = bbox_better[:4].cpu().numpy().flatten()
+
+                                bbox_better[0] = _j / model.S + bbox_better[0] 
+                                bbox_better[1] = _i / model.S + bbox_better[1] 
+
+
                                 bbox_better[0], bbox_better[1], bbox_better[2], bbox_better[3] = cx_cy_to_corners(*bbox_better)
                                 position = bbox_better * np.array([model.w, model.h, model.w, model.h])
                                 position = position.astype(np.int32)

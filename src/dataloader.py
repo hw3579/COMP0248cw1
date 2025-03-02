@@ -273,44 +273,44 @@ if __name__ == '__main__':
 
     # plt.show()
 
-    # dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=1)
-    # dataset.getitem(0)
-    # # print(dataset[0])
-    # ax, pl = plt.subplots(1, 2)
-    # image = dataset[0][0].permute(1, 2, 0)
-    # label = dataset[0][1]
-    # pl[0].imshow(image)
-    # pl[1].imshow(draw_the_yolo_label(image, label))
-    # plt.show()
-
-    dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov3")
+    dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
     dataset.getitem(0)
     # print(dataset[0])
     ax, pl = plt.subplots(1, 2)
     image = dataset[0][0].permute(1, 2, 0)
-    label = dataset[0][1][0]
+    label = dataset[0][1]
     pl[0].imshow(image)
     pl[1].imshow(draw_the_yolo_label(image, label))
     plt.show()
 
+    # dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov3")
+    # dataset.getitem(0)
+    # # print(dataset[0])
+    # ax, pl = plt.subplots(1, 2)
+    # image = dataset[0][0].permute(1, 2, 0)
+    # label = dataset[0][1][0]
+    # pl[0].imshow(image)
+    # pl[1].imshow(draw_the_yolo_label(image, label))
+    # plt.show()
 
 
 
-    test_dataset = Comp0249Dataset('data/CamVid', "train")
-    image, label = test_dataset.getitem(0)
-    image = image.numpy().transpose(1, 2, 0).astype(np.uint8)
-    label = label.numpy()
-    image = draw_the_box(image, label)
-    # automatically resize window
-    cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('label', cv2.WINDOW_NORMAL)
-    # large the image
-    h, w, _ = image.shape
-    cv2.resizeWindow('image', 960, 720)
-    cv2.resizeWindow('label', 960, 720)
-    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    cv2.imshow('image', image)
-    cv2.imshow('label', label*20)
 
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # test_dataset = Comp0249Dataset('data/CamVid', "train")
+    # image, label = test_dataset.getitem(0)
+    # image = image.numpy().transpose(1, 2, 0).astype(np.uint8)
+    # label = label.numpy()
+    # image = draw_the_box(image, label)
+    # # automatically resize window
+    # cv2.namedWindow('image', cv2.WINDOW_NORMAL)
+    # cv2.namedWindow('label', cv2.WINDOW_NORMAL)
+    # # large the image
+    # h, w, _ = image.shape
+    # cv2.resizeWindow('image', 960, 720)
+    # cv2.resizeWindow('label', 960, 720)
+    # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    # cv2.imshow('image', image)
+    # cv2.imshow('label', label*20)
+
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
