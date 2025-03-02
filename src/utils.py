@@ -189,22 +189,5 @@ def check_binary(matrix: torch.Tensor) -> bool:
     """
     return torch.all((matrix == 0) | (matrix == 1)).item()
 
-if __name__ == '__main__':
-    test_dataset = Comp0249Dataset('data/CamVid', "train")
-    image, label = test_dataset.testgetitem(0)
-    image = image.numpy().transpose(1, 2, 0).astype(np.uint8)
-    label = label.numpy()
-    image = draw_the_box(image, label)
-    # automatically resize window
-    cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('label', cv2.WINDOW_NORMAL)
-    # large the image
-    h, w, _ = image.shape
-    cv2.resizeWindow('image', 960, 720)
-    cv2.resizeWindow('label', 960, 720)
-    cv2.imshow('image', image)
-    cv2.imshow('label', label*20)
-
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+# from dataloader import Comp0249Dataset
 

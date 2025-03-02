@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 
-from dataloader import Comp0249Dataset, Comp0249DatasetYolo
+from dataloader import Comp0249Dataset
 from tqdm import tqdm
 
 class Bottleneck(nn.Module):
@@ -336,7 +336,6 @@ if __name__ == "__main__":
         total_acc.append(acc_per_epoch)
 
     # 保存模型及训练指标
-    torch.save(model.state_dict(), 'results/deeplabmodel.pth')
     torch.save(model, 'results/deeplabmodelfull.pth')
     import json
     data = {

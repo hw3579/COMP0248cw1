@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 
-from dataloader import Comp0249Dataset, Comp0249DatasetYolo
+from dataloader import Comp0249Dataset
 from tqdm import tqdm
 
 
@@ -56,11 +56,12 @@ class ResUnitX(nn.Module):
     
 
 class Yolov3(nn.Module):
-    def __init__(self, num_classes, in_channels=3):
+    def __init__(self, num_classes, in_channels=3, B=2):
         super(Yolov3, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
-        self.out_channels = num_classes + 5*2
+        self.out_channels = num_classes + 5*B
+        self.C = num_classes
         self.conv1 = CBL(in_channels, 32, 3, 1, 1)
         self.resunit1 = ResUnitX(32, 1)
         self.resunit2 = ResUnitX(64, 2)
@@ -254,7 +255,7 @@ def yolo_loss_funcv3(pred, target, Sx, Sy, B=2, C=20):
     medium_cell = yolo_loss_funcv3_1(pred[1], target[1], Sx=Sx*2, Sy=Sy*2, B=B, C=C)
     small_cell = yolo_loss_funcv3_1(pred[2], target[2], Sx=Sx*4, Sy=Sy*4, B=B, C=C)
     
-    return (large_cell + medium_cell + small_cell)/3
+    return large_cell + medium_cell + small_cell
 
 
 
@@ -296,7 +297,7 @@ def yolo_accuracy_v3(pred, target, C=20):
     medium_cell = yolo_accuracy(pred[1], target[1], C)
     small_cell = yolo_accuracy(pred[2], target[2], C)
     
-    return (large_cell + medium_cell + small_cell) / 3
+    return large_cell + medium_cell + small_cell
    
 
 import math
@@ -308,7 +309,7 @@ if __name__ == '__main__':
     # 960, 720 -> 30, 23 & 60, 45 & 120, 90
 
 
-    train_dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=1, transform=None, target_transform=None, version=3)
+    train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
     train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=0)
     data = train_dataset[0]
     # print(data[0].shape, data[1].shape)    
@@ -319,7 +320,7 @@ if __name__ == '__main__':
     tst_label[0] = data[1][0].unsqueeze(0)
     tst_label[1] = data[1][1].unsqueeze(0)
     tst_label[2] = data[1][2].unsqueeze(0)
-    model = Yolov3(5, in_channels=3)
+    model = Yolov3(5, in_channels=3, B=2)
 
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -336,10 +337,10 @@ if __name__ == '__main__':
     # best_loss = float('inf')
     # epochs_no_improve = 0
 
-    test = yolo_loss_funcv3(tst_label, tst_label, w/32, h/32, C=5)
-    print(test)
-    test_acc = yolo_accuracy_v3(tst_label, tst_label, C=5)
-    print(test_acc)
+    # test = yolo_loss_funcv3(tst_label, tst_label, w/32, h/32, C=5)
+    # print(test)
+    # test_acc = yolo_accuracy_v3(tst_label, tst_label, C=5)
+    # print(test_acc)
 
     for epoch in tqdm(range(num_epochs), desc="Epochs"):
         loss_per_epoch = 0.0
@@ -354,6 +355,7 @@ if __name__ == '__main__':
 
             # 计算预测结果
             pred = model(images)
+            # pred = labels
 
             loss = yolo_loss_funcv3(pred, labels, w/32, h/32, C=5)
             loss.backward()
@@ -388,11 +390,11 @@ if __name__ == '__main__':
 
 
     # 保存模型及训练指标
-    torch.save(model, 'results/full_model_yolov3.pth')
-    import json
-    data = {
-        'loss': total_loss,
-        'accuracy': total_acc
-    }
-    with open('results/data_yolov3.json', 'w') as f:
-        json.dump(data, f)
+    # torch.save(model, 'results/full_model_yolov3.pth')
+    # import json
+    # data = {
+    #     'loss': total_loss,
+    #     'accuracy': total_acc
+    # }
+    # with open('results/data_yolov3.json', 'w') as f:
+    #     json.dump(data, f)

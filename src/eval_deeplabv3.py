@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from train import TotalModel#, segmentation_loss, 
 from train import yolo_loss_func, yolo_accuracy
-from dataloader import Comp0249Dataset, Comp0249DatasetYolo, cx_cy_to_corners
+from dataloader import Comp0249Dataset, cx_cy_to_corners
 import numpy as np
 from utils import draw_the_box
 from train_deeplabv3 import compute_iou

@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 
-from dataloader import Comp0249Dataset, Comp0249DatasetYolo
+from dataloader import Comp0249Dataset
 from tqdm import tqdm
 
 from utils import check_binary
@@ -246,7 +246,7 @@ def yolo_accuracy(predictions, targets, C=20):
 if __name__ == "__main__":
 
 
-    train_dataset = Comp0249DatasetYolo('data/CamVid', "train", scale=2, transform=None, target_transform=None)
+    train_dataset = Comp0249Dataset('data/CamVid', "train", scale=2, transform=None, target_transform=None, version="yolov1")
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=0)
     data = train_dataset[0]
     # print(data[0].shape, data[1].shape)    

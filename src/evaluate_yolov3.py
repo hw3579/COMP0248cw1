@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from yolov3 import CBL, ResUnit, ResUnitX, Yolov3
 from yolov3 import yolo_loss_funcv3, yolo_accuracy_v3
-from dataloader import Comp0249Dataset, Comp0249DatasetYolo, cx_cy_to_corners
+from dataloader import Comp0249Dataset, cx_cy_to_corners
 import numpy as np
 from utils import draw_the_box
 
@@ -19,7 +19,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
 #load test data
-test_dataset = Comp0249DatasetYolo('data/CamVid', "val", scale=1, transform=None, target_transform=None, version=3)
+test_dataset = Comp0249Dataset('data/CamVid', "val", scale=1, transform=None, target_transform=None, version="yolov3")
 test_loader = DataLoader(test_dataset, batch_size=6, shuffle=False, num_workers=0)
 
 is_plot = True
@@ -70,7 +70,7 @@ with torch.no_grad():
                                     bbox_better = position_xywh_bbox2[_i][_j]
                                 
                                 # print(bbox_better[4])
-                                if bbox_better[4] > 0.4:
+                                if bbox_better[4] > 0.2:
                                     bbox_better = bbox_better[:4].cpu().numpy().flatten()
                                     bbox_better[0], bbox_better[1], bbox_better[2], bbox_better[3] = cx_cy_to_corners(*bbox_better)
                                     position = bbox_better * np.array([model.w, model.h, model.w, model.h])

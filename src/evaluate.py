@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from train import TotalModel#, segmentation_loss, 
 from train import yolo_loss_func, yolo_accuracy
-from dataloader import Comp0249Dataset, Comp0249DatasetYolo, cx_cy_to_corners
+from dataloader import Comp0249Dataset, cx_cy_to_corners
 import numpy as np
 from utils import draw_the_box
 # 假设 test_loader 已经构建好
@@ -24,7 +24,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
 #load test data
-test_dataset = Comp0249DatasetYolo('data/CamVid', "val", scale=1, transform=None, target_transform=None)
+test_dataset = Comp0249Dataset('data/CamVid', "val", scale=1, transform=None, target_transform=None, version="yolov1")
 test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False, num_workers=0)
 
 is_plot = True
