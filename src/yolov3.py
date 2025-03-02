@@ -298,7 +298,7 @@ def yolo_accuracy_v3(pred, target, C=20):
     medium_cell = yolo_accuracy(pred[1], target[1], C)
     small_cell = yolo_accuracy(pred[2], target[2], C)
     
-    return large_cell + medium_cell + small_cell
+    return (large_cell + medium_cell + small_cell)/3
    
 
 import math
@@ -330,7 +330,7 @@ if __name__ == '__main__':
     tst_label[0] = data[1][0].unsqueeze(0)
     tst_label[1] = data[1][1].unsqueeze(0)
     tst_label[2] = data[1][2].unsqueeze(0)
-    model = Yolov3(5, in_channels=3, B=2)
+    model = Yolov3(C=5, in_channels=3, B=2)
 
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -371,7 +371,7 @@ if __name__ == '__main__':
                     pred = model(images)
                     # pred = labels
 
-                    loss = yolo_loss_funcv3(pred, labels, w/32, h/32, C=5)
+                    loss = yolo_loss_funcv3(pred, labels, w/32, h/32, model.C)
 
                     # 使用scaler缩放损失并执行反向传播
                     scaler.scale(loss).backward()
@@ -383,14 +383,14 @@ if __name__ == '__main__':
                 pred = model(images)
                 # pred = labels
 
-                loss = yolo_loss_funcv3(pred, labels, w/32, h/32, C=5)
+                loss = yolo_loss_funcv3(pred, labels, w/32, h/32, model.C)
                 loss.backward()
                 optimizer.step()
 
             loss_per_epoch += loss.item()
 
             # 使用刚刚定义的 yolo_accuracy 计算存在目标格子的分类准确率
-            batch_acc = yolo_accuracy_v3(pred, labels, C=5)
+            batch_acc = yolo_accuracy_v3(pred, labels, model.C)
             acc_per_epoch += batch_acc.item()
 
         loss_per_epoch /= len(train_loader)

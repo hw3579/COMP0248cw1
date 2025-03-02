@@ -39,6 +39,7 @@ rev_selected_classes = {v: k for k, v in selected_classes.items()}
 
 w, h = 960, 720
 model.w, model.h = w, h
+
 with torch.no_grad():
     for images, labels in tqdm(test_loader):
         images = images.to(device, dtype=torch.float32)
@@ -55,6 +56,7 @@ with torch.no_grad():
         print('loss', loss.item(), 'acc', batch_acc.item())
         for _cell in range(len(outputs)):
             output = outputs[_cell]
+            model.Sy, model.Sx = output.shape[1], output.shape[2]
             for _b in range(len(images)):
                 position_class = output[_b,:,:,:5]
                 position_xywh_bbox1 = output[_b,:,:,5:10]
@@ -72,6 +74,10 @@ with torch.no_grad():
                                 # print(bbox_better[4])
                                 if bbox_better[4] > 0.2:
                                     bbox_better = bbox_better[:4].cpu().numpy().flatten()
+
+                                    bbox_better[0] = (_j  + bbox_better[0])/ model.Sx
+                                    bbox_better[1] = (_i + bbox_better[1]) / model.Sy
+
                                     bbox_better[0], bbox_better[1], bbox_better[2], bbox_better[3] = cx_cy_to_corners(*bbox_better)
                                     position = bbox_better * np.array([model.w, model.h, model.w, model.h])
                                     position = position.astype(np.int32)

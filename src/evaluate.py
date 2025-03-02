@@ -47,8 +47,8 @@ with torch.no_grad():
     for images, labels in tqdm(test_loader):
         images = images.to(device, dtype=torch.float32)
         labels = labels.to(device, dtype=torch.float)
-        output = labels
-        # output = model(images)
+        # output = labels
+        output = model(images)
 
         loss = yolo_loss_func(output, labels, model.S, model.B, model.C)
         total_loss.append(loss.item())
@@ -73,8 +73,8 @@ with torch.no_grad():
                             if bbox_better[4] > 0.5:
                                 bbox_better = bbox_better[:4].cpu().numpy().flatten()
 
-                                bbox_better[0] = _j / model.S + bbox_better[0] 
-                                bbox_better[1] = _i / model.S + bbox_better[1] 
+                                bbox_better[0] = (_j + bbox_better[0]) /model.S
+                                bbox_better[1] = (_i + bbox_better[1]) /model.S
 
 
                                 bbox_better[0], bbox_better[1], bbox_better[2], bbox_better[3] = cx_cy_to_corners(*bbox_better)
