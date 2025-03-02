@@ -390,11 +390,11 @@ if __name__ == '__main__':
 
 
     # 保存模型及训练指标
-    # torch.save(model, 'results/full_model_yolov3.pth')
-    # import json
-    # data = {
-    #     'loss': total_loss,
-    #     'accuracy': total_acc
-    # }
-    # with open('results/data_yolov3.json', 'w') as f:
-    #     json.dump(data, f)
+    torch.save(model, 'results/full_model_yolov3.pth')
+    import json
+    data = {
+        'loss': total_loss,
+        'accuracy': total_acc
+    }
+    with open('results/data_yolov3.json', 'w') as f:
+        json.dump(data, f)
