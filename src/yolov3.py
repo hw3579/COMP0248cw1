@@ -61,6 +61,7 @@ class Yolov3(nn.Module):
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.out_channels = num_classes + 5*B
+        self.B = B
         self.C = num_classes
         self.conv1 = CBL(in_channels, 32, 3, 1, 1)
         self.resunit1 = ResUnitX(32, 1)
@@ -316,7 +317,7 @@ if __name__ == '__main__':
     train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
 
     if is_use_autoscale:
-        train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=6, pin_memory=True, persistent_workers=True)
+        train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
     else:
         train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
 
@@ -330,7 +331,7 @@ if __name__ == '__main__':
     tst_label[0] = data[1][0].unsqueeze(0)
     tst_label[1] = data[1][1].unsqueeze(0)
     tst_label[2] = data[1][2].unsqueeze(0)
-    model = Yolov3(C=5, in_channels=3, B=2)
+    model = Yolov3(5, in_channels=3, B=2)
 
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -371,7 +372,7 @@ if __name__ == '__main__':
                     pred = model(images)
                     # pred = labels
 
-                    loss = yolo_loss_funcv3(pred, labels, w/32, h/32, model.C)
+                    loss = yolo_loss_funcv3(pred, labels, w/32, h/32, model.B, model.C)
 
                     # 使用scaler缩放损失并执行反向传播
                     scaler.scale(loss).backward()
