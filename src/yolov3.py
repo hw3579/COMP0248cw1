@@ -33,11 +33,13 @@ class ResUnit(nn.Module):
         super(ResUnit, self).__init__()
         self.cbl1 = CBL(in_channels, in_channels // 2, 1, 1, 0)
         self.cbl2 = CBL(in_channels // 2, in_channels, 3, 1, 1)
-    
+        self.dropout = nn.Dropout2d(0.3)   # 添加空间Dropout
+
     def forward(self, x):
         residual = x
         x = self.cbl1(x)
         x = self.cbl2(x)
+        x = self.dropout(x)  # 在residual连接前应用dropout
         return x + residual
     
 class ResUnitX(nn.Module):
@@ -88,8 +90,10 @@ class Yolov3(nn.Module):
         return nn.Sequential(
             CBL(in_channels, in_channels//2, 1, 1, 0),
             CBL(in_channels//2, in_channels, 3, 1, 1),
+            nn.Dropout2d(0.1),  # 添加dropout
             CBL(in_channels, in_channels//2, 1, 1, 0),
             CBL(in_channels//2, in_channels, 3, 1, 1),
+            nn.Dropout2d(0.1),  # 添加dropout
             CBL(in_channels, in_channels//2, 1, 1, 0)
         )
 
@@ -102,6 +106,8 @@ class Yolov3(nn.Module):
         x = self.resunit5(pred2)
         pred1 = self.cblset1(x)
         
+        # 添加dropout
+        pred1 = F.dropout(pred1, p=0.2, training=self.training)
         #### pred1
         pred1_out = self.pred1_cbl(pred1)
         pred1_out = self.pred1_conv(pred1_out)
@@ -304,6 +310,22 @@ def yolo_accuracy_v3(pred, target, C=20):
 
 import math
 from torch.amp import autocast, GradScaler
+
+
+# 定义图像增强策略
+transform = transforms.Compose([
+    # 将tensor转为PIL以应用transforms
+    transforms.ToPILImage(),
+    # 随机水平翻转
+    transforms.RandomHorizontalFlip(p=0.5),
+    # 随机调整亮度、对比度、饱和度、色调
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05),
+    # 随机旋转、平移和缩放
+    transforms.RandomAffine(degrees=5, translate=(0.05, 0.05), scale=(0.95, 1.05)),
+    # 转回tensor
+    transforms.ToTensor(),
+])
+
 if __name__ == '__main__':
     # test_ResUnit() # 1, 32, 416, 416
     # test_ResUnitX() # 1, 64, 208, 208
@@ -314,7 +336,7 @@ if __name__ == '__main__':
 
     is_use_autoscale = True
 
-    train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
+    train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=transform, target_transform=None, version="yolov3")
 
     if is_use_autoscale:
         train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
@@ -337,7 +359,11 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode='min', factor=0.5, patience=5
+)
 
     total_loss = []
     total_acc = []
@@ -396,7 +422,13 @@ if __name__ == '__main__':
 
         loss_per_epoch /= len(train_loader)
         acc_per_epoch /= len(train_loader)
-        print(f"Epoch: {epoch}, Loss: {loss_per_epoch:.4f}, Acc: {acc_per_epoch:.4f}")
+        
+        # **在这里调用学习率调整**
+        scheduler.step(loss_per_epoch)  # 这里使用训练损失调整学习率（可改为 val_loss）
+
+        # **打印日志**
+        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss_per_epoch:.4f}, Accuracy: {acc_per_epoch:.4f}")
+        print(f"Current Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
 
         total_loss.append(loss_per_epoch)
         total_acc.append(acc_per_epoch)
@@ -417,11 +449,11 @@ if __name__ == '__main__':
 
 
     # 保存模型及训练指标
-    torch.save(model, 'results/full_model_yolov3.pth')
+    torch.save(model, 'results/full_model_yolov3_optimize2.pth')
     import json
     data = {
         'loss': total_loss,
         'accuracy': total_acc
     }
-    with open('results/data_yolov3.json', 'w') as f:
+    with open('results/data_yolov3_optimize2.json', 'w') as f:
         json.dump(data, f)

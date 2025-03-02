@@ -65,14 +65,14 @@ with torch.no_grad():
                 for _i in range(position_class.shape[0]):
                     for _j in range(position_class.shape[1]):
                         for _c in range(5):
-                            if position_class[_i][_j][_c] >0.5:
+                            if position_class[_i][_j][_c] >0.4:
                                 if position_xywh_bbox1[_i][_j][4] > position_xywh_bbox2[_i][_j][4]:
                                     bbox_better = position_xywh_bbox1[_i][_j]
                                 else:
                                     bbox_better = position_xywh_bbox2[_i][_j]
                                 
                                 # print(bbox_better[4])
-                                if bbox_better[4] > 0.2:
+                                if bbox_better[4] > 0.4:
                                     bbox_better = bbox_better[:4].cpu().numpy().flatten()
 
                                     bbox_better[0] = (_j  + bbox_better[0])/ model.Sx
@@ -94,9 +94,10 @@ with torch.no_grad():
                                     text_position = (position[0], position[1] - 10 if position[1] - 10 > 0 else position[1] + 20)
                                     image = cv2.putText(image, text, text_position, font, 0.5, (255, 25*_b, 255), 2)
 
-                if image is not None and is_plot:
-                    plt.imshow(image)
-                    plt.show()
+            if image is not None and is_plot:
+                print("plotting")
+                # plt.imshow(image)
+                # plt.show()
                         
 
 
