@@ -163,7 +163,7 @@ def test_ResUnitX():
     print(y.shape)
 
 def test_Yolov3():
-    yolov3 = Yolov3(5)
+    yolov3 = Yolov3(5, in_channels=3, B=1)
     x = torch.randn(1, 3, 960, 720)
     y1, y2, y3 = yolov3(x)
     print(y1.shape, y2.shape, y3.shape)
@@ -364,7 +364,7 @@ if __name__ == '__main__':
     tst_label[0] = data[1][0].unsqueeze(0)
     tst_label[1] = data[1][1].unsqueeze(0)
     tst_label[2] = data[1][2].unsqueeze(0)
-    model = Yolov3(5, in_channels=3, B=2)
+    model = Yolov3(5, in_channels=3, B=1)
 
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

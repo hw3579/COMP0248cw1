@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from yolov3 import CBL, ResUnit, ResUnitX, Yolov3
 from yolov3 import yolo_loss_funcv3, yolo_accuracy_v3
-from dataloader import Comp0249Dataset, cx_cy_to_corners
+from dataloader import Comp0249Dataset
+from utils import cx_cy_to_corners
 import numpy as np
 from utils import draw_the_box
 
@@ -50,8 +51,8 @@ with torch.no_grad():
         images = images.to(device, dtype=torch.float32)
         for i in range(len(labels)):
             labels[i] = labels[i].to(device, dtype=torch.float32)
-        # outputs = labels
-        outputs = model(images)
+        outputs = labels
+        # outputs = model(images)
 
         loss = yolo_loss_funcv3(outputs, labels, w/32, h/32, C=5)
         total_loss.append(loss.item())

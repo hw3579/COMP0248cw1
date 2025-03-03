@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from train import TotalModel#, segmentation_loss, 
 from train import yolo_loss_func, yolo_accuracy
-from dataloader import Comp0249Dataset, cx_cy_to_corners
+from dataloader import Comp0249Dataset
+from utils import cx_cy_to_corners
 import numpy as np
 from utils import draw_the_box
 # 假设 test_loader 已经构建好
@@ -43,6 +44,9 @@ selected_classes = {
 # 将 selected_classes 反转：数字 -> 类别名称
 rev_selected_classes = {v: k for k, v in selected_classes.items()}
 
+class_threshold = 0.5
+confidence_threshold = 0.5
+
 with torch.no_grad():
     for images, labels in tqdm(test_loader):
         images = images.to(device, dtype=torch.float32)
@@ -61,10 +65,16 @@ with torch.no_grad():
             position_xywh_bbox1 = output[_b,:,:,5:10]
             position_xywh_bbox2 = output[_b,:,:,10:15]  
             image = None         
-            for _i in range(position_class.shape[0]):
-                for _j in range(position_class.shape[1]):
-                    for _c in range(model.C):
-                        if position_class[_i][_j][_c] >0.5:
+
+            mask = position_class > class_threshold # [H,W,5]的布尔值
+            indices = torch.nonzero(mask, as_tuple=False) # [N,3]的索引值，N为非零元素的个数
+
+            for _i, _j, _c in indices:
+                            _c = _c.item()
+            # for _i in range(position_class.shape[0]):
+            #     for _j in range(position_class.shape[1]):
+            #         for _c in range(model.C):
+            #             if position_class[_i][_j][_c] >0.5:
                             if position_xywh_bbox1[_i][_j][4] > position_xywh_bbox2[_i][_j][4]:
                                 bbox_better = position_xywh_bbox1[_i][_j]
                             else:

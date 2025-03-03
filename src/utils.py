@@ -200,5 +200,55 @@ def check_binary(matrix: torch.Tensor) -> bool:
     """
     return torch.all((matrix == 0) | (matrix == 1)).item()
 
-# from dataloader import Comp0249Dataset
+def cx_cy_to_corners(cx, cy, w, h):
+    '''
+    input: cx, cy, w, h - the center x, center y, width, and height of the box
+    output: x1, y1, x2, y2 - the coordinates of the top left and bottom right corners of the box
+    '''
+    x1 = cx - w/2
+    y1 = cy - h/2
+    x2 = cx + w/2
+    y2 = cy + h/2
+    return x1, y1, x2, y2
 
+def draw_the_yolo_label(image, yolo_label):
+    '''
+    input: image - the image to draw the box on
+                    yolo_label: torch.Tensor, 尺寸 (S, S, num_classes + B*5)
+                    格式为：前 num_classes 维：one-hot 目标类别；
+                            后面 B*5 维，每个边框组成 [cx, cy, w, h, confidence]
+    output: image - the image with the box drawn on it (H, W)
+    '''
+    H, W, C = image.shape
+    class_yolo = yolo_label[..., :5]
+    bbox_yolo = yolo_label[..., 5:]
+    for i in range(5):
+        # 得到当前类别的掩码，类型为 bool
+        mask = (class_yolo[..., i] > 0)
+        # 如果该类别没有像素，则跳过
+        if np.count_nonzero(mask) == 0:
+            continue
+        Sy, Sx = mask.shape
+        # 获得该类别像素的行和列索引
+        rows, cols = np.where(mask)
+        class_position = np.hstack((rows.reshape(-1, 1), cols.reshape(-1, 1)))
+
+        for _ in range(len(class_position)):
+            y_index, x_index = class_position[_] # 23, 30
+
+            selected_yolo = bbox_yolo[y_index, x_index, :]
+
+            position = selected_yolo[..., :4].numpy().flatten()
+
+            position[0] = (x_index + position[0]) / Sx
+            position[1] = (y_index + position[1]) / Sy
+            position[0], position[1], position[2], position[3] = cx_cy_to_corners(*position)
+
+            position = position * np.array([W, H, W, H])
+            position = position.astype(np.int32)
+            # 保证 image 内存连续
+            image = np.ascontiguousarray(image)
+            # 绘制矩形框
+            image = cv2.rectangle(image, (position[0], position[1]), (position[2], position[3]), (255, 25*i, 255), 2)
+        
+    return image

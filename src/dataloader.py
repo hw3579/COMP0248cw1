@@ -16,6 +16,7 @@ import pandas as pd
 
 from utils import segmentation_to_yolo
 from utils import segmentation_to_yolov3
+from utils import draw_the_yolo_label
 # print('Using PyTorch version:', torch.__version__)
 # if torch.cuda.is_available():
 #     print('Using GPU, device name:', torch.cuda.get_device_name(0))
@@ -120,144 +121,96 @@ class Comp0249Dataset(Dataset):
         elif self.version == "yolov1":
             yolo_label = segmentation_to_yolo(label_gray, S=7, num_classes=5, B=2, scale=self.scale)
         elif self.version == "yolov3":
-            yolo_label = segmentation_to_yolov3(label_gray, w, h, num_classes=5, B=2, scale=self.scale)
+            yolo_label = segmentation_to_yolov3(label_gray, w, h, num_classes=5, B=1, scale=self.scale)
 
         return image, yolo_label
 
     def getitem(self, idx):
         return self.__getitem__(idx)
 
-import cv2
 
-def cx_cy_to_corners(cx, cy, w, h):
-    '''
-    input: cx, cy, w, h - the center x, center y, width, and height of the box
-    output: x1, y1, x2, y2 - the coordinates of the top left and bottom right corners of the box
-    '''
-    x1 = cx - w/2
-    y1 = cy - h/2
-    x2 = cx + w/2
-    y2 = cy + h/2
-    return x1, y1, x2, y2
-
-def draw_the_yolo_label(image, yolo_label):
-    '''
-    input: image - the image to draw the box on
-                    yolo_label: torch.Tensor, 尺寸 (S, S, num_classes + B*5)
-                    格式为：前 num_classes 维：one-hot 目标类别；
-                            后面 B*5 维，每个边框组成 [cx, cy, w, h, confidence]
-    output: image - the image with the box drawn on it (H, W)
-    '''
-    H, W, _ = image.shape
-    class_yolo = yolo_label[..., :5]
-    bbox_yolo = yolo_label[..., 5:]
-    for i in range(5):
-        # 得到当前类别的掩码，类型为 bool
-        mask = (class_yolo[..., i] > 0)
-        # 如果该类别没有像素，则跳过
-        if np.count_nonzero(mask) == 0:
-            continue
-
-        # 获得该类别像素的行和列索引
-        rows, cols = np.where(mask)
-        class_position = np.hstack((rows.reshape(-1, 1), cols.reshape(-1, 1)))
-
-        for _ in range(len(class_position)):
-            Sx, Sy = class_position[_]
-            left = Sy * W // 7
-            top = Sx * H // 7
-            selected_yolo = bbox_yolo[Sx, Sy, :]
-
-            position = selected_yolo[..., :4].numpy().flatten()
-
-            position[0], position[1], position[2], position[3] = cx_cy_to_corners(*position)
-
-            position = position * np.array([W, H, W, H])
-            position = position.astype(np.int32)
-            # 保证 image 内存连续
-            image = np.ascontiguousarray(image)
-            # 绘制矩形框
-            image = cv2.rectangle(image, (position[0], position[1]), (position[2], position[3]), (255, 25*i, 255), 2)
-        
-    return image
 
 
 from utils import draw_the_box
 if __name__ == '__main__':
-    # dataset = Comp0249Dataset('data/CamVid', "train", scale=1)
-    # dataset.getitem(0)
-    # # print(dataset[0])
-    # ax, pl = plt.subplots(1, 2)
-    # pl[0].imshow(dataset[0][0].permute(1, 2, 0))
-    # pl[1].imshow(dataset[0][1], cmap='gray')
 
-    # plt.show()
-
-    import time
-    from torch.utils.data import DataLoader
-
-    def benchmark_dataloader(num_workers):
-        dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
-        train_loader = DataLoader(dataset, batch_size=32, num_workers=num_workers)
-        start = time.time()
-        for _ in range(5):  # 运行5个 batch
-            for batch in train_loader:
-                pass  # 仅测试数据加载速度
-        end = time.time()
-        return end - start
-
-    for nw in range(10):
-        time_taken = benchmark_dataloader(nw)
-        print(f"num_workers={nw}, load time={time_taken:.4f}s")
-
-    '''
-    debug mode:
-    num_workers=1, load time=423.4714s
-    num_workers=2, load time=282.9612s
-
-
-    '''
-
-    
-
-    dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
-    dataset.getitem(0)
-    # print(dataset[0])
-    ax, pl = plt.subplots(1, 2)
-    image = dataset[0][0].permute(1, 2, 0)
-    label = dataset[0][1]
-    pl[0].imshow(image)
-    pl[1].imshow(draw_the_yolo_label(image, label))
-    plt.show()
-
-    # dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov3")
-    # dataset.getitem(0)
-    # # print(dataset[0])
-    # ax, pl = plt.subplots(1, 2)
-    # image = dataset[0][0].permute(1, 2, 0)
-    # label = dataset[0][1][0]
-    # pl[0].imshow(image)
-    # pl[1].imshow(draw_the_yolo_label(image, label))
-    # plt.show()
+    benchmark_dataloader = 0
+    test_dataloader = 1
 
 
 
 
-    # test_dataset = Comp0249Dataset('data/CamVid', "train")
-    # image, label = test_dataset.getitem(0)
-    # image = image.numpy().transpose(1, 2, 0).astype(np.uint8)
-    # label = label.numpy()
-    # image = draw_the_box(image, label)
-    # # automatically resize window
-    # cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-    # cv2.namedWindow('label', cv2.WINDOW_NORMAL)
-    # # large the image
-    # h, w, _ = image.shape
-    # cv2.resizeWindow('image', 960, 720)
-    # cv2.resizeWindow('label', 960, 720)
-    # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    # cv2.imshow('image', image)
-    # cv2.imshow('label', label*20)
+    if benchmark_dataloader:
+        import time
+        from torch.utils.data import DataLoader
 
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+        def benchmark_dataloader(num_workers):
+            dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
+            train_loader = DataLoader(dataset, batch_size=32, num_workers=num_workers)
+            start = time.time()
+            for _ in range(5):  # 运行5个 batch
+                for batch in train_loader:
+                    pass  # 仅测试数据加载速度
+            end = time.time()
+            return end - start
+
+        for nw in range(3,6):
+            time_taken = benchmark_dataloader(nw)
+            print(f"num_workers={nw}, load time={time_taken:.4f}s")
+
+        '''
+        debug mode:
+        num_workers=1, load time=423.4714s
+        num_workers=2, load time=282.9612s
+        num_workers=3, load time=198.7757s
+        num_workers=4, load time=185.6829s
+        num_workers=5, load time=202.7755s
+
+
+        '''
+
+    if test_dataloader:
+        dataset = Comp0249Dataset('data/CamVid', "train", scale=1)
+        dataset.getitem(0)
+        # print(dataset[0])
+        fig, pl = plt.subplots(2, 2)
+        pl[0, 0].imshow(dataset[0][0].permute(1, 2, 0))
+        pl[0, 1].imshow(dataset[0][1], cmap='gray')
+
+        dataset_yolov1 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
+        dataset_yolov1.getitem(0)
+        image_yolov1 = dataset_yolov1[0][0].permute(1, 2, 0)
+        label_yolov1 = dataset_yolov1[0][1]
+        pl[1, 0].imshow(draw_the_yolo_label(image_yolov1, label_yolov1))
+
+        dataset_yolov3 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov3")
+        dataset_yolov3.getitem(0)
+        image_yolov3 = dataset_yolov3[0][0].permute(1, 2, 0)
+        label_yolov3 = dataset_yolov3[0][1][0]
+        pl[1, 1].imshow(draw_the_yolo_label(image_yolov3, label_yolov3))
+
+        plt.savefig('fig/data.png')
+        plt.show()
+
+
+
+
+
+        # test_dataset = Comp0249Dataset('data/CamVid', "train")
+        # image, label = test_dataset.getitem(0)
+        # image = image.numpy().transpose(1, 2, 0).astype(np.uint8)
+        # label = label.numpy()
+        # image = draw_the_box(image, label)
+        # # automatically resize window
+        # cv2.namedWindow('image', cv2.WINDOW_NORMAL)
+        # cv2.namedWindow('label', cv2.WINDOW_NORMAL)
+        # # large the image
+        # h, w, _ = image.shape
+        # cv2.resizeWindow('image', 960, 720)
+        # cv2.resizeWindow('label', 960, 720)
+        # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        # cv2.imshow('image', image)
+        # cv2.imshow('label', label*20)
+
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
