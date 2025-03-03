@@ -8,7 +8,7 @@ from dataloader import Comp0249Dataset, cx_cy_to_corners
 import numpy as np
 from utils import draw_the_box
 
-model = torch.load('results/full_model_yolov3.pth', weights_only=False)
+model = torch.load('results/full_model_yolov3_optimize2.pth', weights_only=False)
 
 model.eval()  # 切换到评估模式
 total_loss = []
@@ -96,8 +96,8 @@ with torch.no_grad():
 
             if image is not None and is_plot:
                 print("plotting")
-                # plt.imshow(image)
-                # plt.show()
+                plt.imshow(image)
+                plt.show()
                         
 
 
