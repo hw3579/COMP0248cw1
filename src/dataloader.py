@@ -193,6 +193,33 @@ if __name__ == '__main__':
 
     # plt.show()
 
+    import time
+    from torch.utils.data import DataLoader
+
+    def benchmark_dataloader(num_workers):
+        dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
+        train_loader = DataLoader(dataset, batch_size=32, num_workers=num_workers)
+        start = time.time()
+        for _ in range(5):  # 运行5个 batch
+            for batch in train_loader:
+                pass  # 仅测试数据加载速度
+        end = time.time()
+        return end - start
+
+    for nw in range(10):
+        time_taken = benchmark_dataloader(nw)
+        print(f"num_workers={nw}, load time={time_taken:.4f}s")
+
+    '''
+    debug mode:
+    num_workers=1, load time=423.4714s
+    num_workers=2, load time=282.9612s
+
+
+    '''
+
+    
+
     dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
     dataset.getitem(0)
     # print(dataset[0])

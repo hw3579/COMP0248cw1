@@ -68,12 +68,12 @@ class Yolov3(nn.Module):
         # self.conv1 = CBL(in_channels, 32, 3, 1, 1)
         self.conv1 = CBL(in_channels, 128, 3, 1, 1)
 
-        # 1 2 8 8 4 -> 0 0 2 2 1
-        self.resunit1 = ResUnitX(32, 1)
-        self.resunit2 = ResUnitX(64, 2)
-        self.resunit3 = ResUnitX(128, 2)
-        self.resunit4 = ResUnitX(256, 2)
-        self.resunit5 = ResUnitX(512, 4)
+        # 1 2 8 8 4 -> 0 0 2 2 1 -> 0 0 1 1 1
+        # self.resunit1 = ResUnitX(32, 1)
+        # self.resunit2 = ResUnitX(64, 2)
+        self.resunit3 = ResUnitX(128, 1)
+        self.resunit4 = ResUnitX(256, 1)
+        self.resunit5 = ResUnitX(512, 1)
 
 
         # 预定义所有需要的模块
@@ -333,6 +333,7 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
+import platform # for CS GPU
 if __name__ == '__main__':
     # test_ResUnit() # 1, 32, 416, 416
     # test_ResUnitX() # 1, 64, 208, 208
@@ -346,7 +347,10 @@ if __name__ == '__main__':
     train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
 
     if is_use_autoscale:
-        train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
+        if platform.system() == 'Windows':
+            train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
+        if platform.system() == 'Linux':
+            train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True)
     else:
         train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
 
@@ -375,7 +379,7 @@ if __name__ == '__main__':
 
     total_loss = []
     total_acc = []
-    num_epochs = 400
+    num_epochs = 150
 
     if is_use_autoscale:
         scaler = GradScaler()
