@@ -71,8 +71,8 @@ class Yolov3(nn.Module):
         # 1 2 8 8 4 -> 0 0 2 2 1 -> 0 0 1 1 1
         # self.resunit1 = ResUnitX(32, 1)
         # self.resunit2 = ResUnitX(64, 2)
-        self.resunit3 = ResUnitX(128, 1)
-        self.resunit4 = ResUnitX(256, 1)
+        self.resunit3 = ResUnitX(128, 2)
+        self.resunit4 = ResUnitX(256, 2)
         self.resunit5 = ResUnitX(512, 1)
 
 
@@ -175,26 +175,31 @@ class Yolov3(nn.Module):
         pred2_out = pred2_out.permute(0, 2, 3, 1)
         pred3_out = pred3_out.permute(0, 2, 3, 1)
 
-        # 对概率位置执行sigmoid
-        pred1_out[..., :self.C] = torch.sigmoid(pred1_out[..., :self.C])
-        pred2_out[..., :self.C] = torch.sigmoid(pred2_out[..., :self.C])
-        pred3_out[..., :self.C] = torch.sigmoid(pred3_out[..., :self.C])
+        # # 对概率位置执行sigmoid
+        # pred1_out[..., :self.C] = torch.sigmoid(pred1_out[..., :self.C])
+        # pred2_out[..., :self.C] = torch.sigmoid(pred2_out[..., :self.C])
+        # pred3_out[..., :self.C] = torch.sigmoid(pred3_out[..., :self.C])
 
-        # 对置信度执行sigmoid
-        pred1_out[..., self.C+4] = torch.sigmoid(pred1_out[..., self.C+4])
-        pred2_out[..., self.C+4] = torch.sigmoid(pred2_out[..., self.C+4])
-        pred3_out[..., self.C+4] = torch.sigmoid(pred3_out[..., self.C+4])
+        # # 对置信度执行sigmoid
+        # pred1_out[..., self.C+4] = torch.sigmoid(pred1_out[..., self.C+4])
+        # pred2_out[..., self.C+4] = torch.sigmoid(pred2_out[..., self.C+4])
+        # pred3_out[..., self.C+4] = torch.sigmoid(pred3_out[..., self.C+4])
 
-        # 对xy坐标执行relu
-        pred1_out[..., self.C:self.C+2] = torch.relu(pred1_out[..., self.C:self.C+2])
-        pred2_out[..., self.C:self.C+2] = torch.relu(pred2_out[..., self.C:self.C+2])
-        pred3_out[..., self.C:self.C+2] = torch.relu(pred3_out[..., self.C:self.C+2])
+        # # 对xy坐标执行relu
+        # # pred1_out[..., self.C:self.C+2] = torch.relu(pred1_out[..., self.C:self.C+2])
+        # # pred2_out[..., self.C:self.C+2] = torch.relu(pred2_out[..., self.C:self.C+2])
+        # # pred3_out[..., self.C:self.C+2] = torch.relu(pred3_out[..., self.C:self.C+2])
 
-        # 对wh尺寸应用激活函数
-        # 选项1: 使用exp (标准YOLOv3做法)
-        pred1_out[..., self.C+2:self.C+4] = torch.exp(pred1_out[..., self.C+2:self.C+4])
-        pred2_out[..., self.C+2:self.C+4] = torch.exp(pred2_out[..., self.C+2:self.C+4])
-        pred3_out[..., self.C+2:self.C+4] = torch.exp(pred3_out[..., self.C+2:self.C+4])
+        # # 使用sigmod 
+        # pred1_out[..., self.C:self.C+2] = torch.sigmoid(pred1_out[..., self.C:self.C+2])
+        # pred2_out[..., self.C:self.C+2] = torch.sigmoid(pred2_out[..., self.C:self.C+2])
+        # pred3_out[..., self.C:self.C+2] = torch.sigmoid(pred3_out[..., self.C:self.C+2])
+
+        # # 对wh尺寸应用激活函数
+        # # 选项1: 使用exp (标准YOLOv3做法)
+        # pred1_out[..., self.C+2:self.C+4] = torch.exp(pred1_out[..., self.C+2:self.C+4])
+        # pred2_out[..., self.C+2:self.C+4] = torch.exp(pred2_out[..., self.C+2:self.C+4])
+        # pred3_out[..., self.C+2:self.C+4] = torch.exp(pred3_out[..., self.C+2:self.C+4])
 
         
         return pred1_out, pred2_out, pred3_out
@@ -320,18 +325,18 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
     )
 
     # Assert to ensure inputs to BCE are in range [0, 1]
-    assert torch.all((obj_mask * pred_best_conf >= 0) & (obj_mask * pred_best_conf <= 1)), "Predicted confidence values must be between 0 and 1"
-    assert torch.all((obj_mask * target_best_conf >= 0) & (obj_mask * target_best_conf <= 1)), "Target confidence values must be between 0 and 1"
-    assert torch.all((obj_mask * pred_class_probs >= 0) & (obj_mask * pred_class_probs <= 1)), "Predicted class probabilities must be between 0 and 1"
-    assert torch.all((obj_mask * target_class_probs >= 0) & (obj_mask * target_class_probs <= 1)), "Target class probabilities must be between 0 and 1"
+    # assert torch.all((obj_mask * pred_best_conf >= 0) & (obj_mask * pred_best_conf <= 1)), "Predicted confidence values must be between 0 and 1"
+    # assert torch.all((obj_mask * target_best_conf >= 0) & (obj_mask * target_best_conf <= 1)), "Target confidence values must be between 0 and 1"
+    # assert torch.all((obj_mask * pred_class_probs >= 0) & (obj_mask * pred_class_probs <= 1)), "Predicted class probabilities must be between 0 and 1"
+    # assert torch.all((obj_mask * target_class_probs >= 0) & (obj_mask * target_class_probs <= 1)), "Target class probabilities must be between 0 and 1"
 
 
     # 计算置信度损失（分目标与无目标部分）
-    obj_conf_loss = F.binary_cross_entropy(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
+    obj_conf_loss = F.mse_loss(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
     # noobj_conf_loss = F.binary_cross_entropy(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='sum')
 
     # 计算分类损失（仅对目标存在的网格）
-    class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
+    class_loss = F.mse_loss(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
 
     # print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), class_loss.item())
     # 最终总损失
@@ -351,6 +356,8 @@ def yolo_loss_funcv3(pred, target, Sx, Sy, B=2, C=20):
     medium_cell = yolo_loss_funcv3_1(pred[1], target[1], Sx=Sx*2, Sy=Sy*2, B=B, C=C)
     small_cell = yolo_loss_funcv3_1(pred[2], target[2], Sx=Sx*4, Sy=Sy*4, B=B, C=C)
     
+    # print(large_cell.item(), medium_cell.item(), small_cell.item())
+    # return small_cell
     return 0.4 * large_cell + 0.4 * medium_cell + 0.2 * small_cell
 
 
@@ -446,7 +453,7 @@ if __name__ == '__main__':
     # 960, 720 -> 30, 23 & 60, 45 & 120, 90
 
 
-    is_use_autoscale = False
+    is_use_autoscale = True
 
     train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
 
