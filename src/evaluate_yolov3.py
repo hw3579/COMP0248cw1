@@ -17,6 +17,7 @@ total_acc = []
 
 # 在测试集上进行评估
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 model.to(device)
 
 #load test data
@@ -57,9 +58,9 @@ with torch.no_grad():
         loss = yolo_loss_funcv3(outputs, labels, w/32, h/32, B=model.B, C=model.C)
         total_loss.append(loss.item())
         batch_acc = yolo_accuracy_v3(outputs, labels, C=model.C)
-        total_acc.append(batch_acc.item())
+        total_acc.append(batch_acc)
 
-        print('loss', loss.item(), 'acc', batch_acc.item())
+        print('loss', loss.item(), 'acc', batch_acc)
         for _cell in range(len(outputs)):
             output = outputs[_cell]
             output = output.cpu()

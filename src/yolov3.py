@@ -204,7 +204,7 @@ def test_Yolov3():
 
 from train import bbox_iou
 
-def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=5, lambda_noobj=0.1):
+def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=5, lambda_noobj=0.5):
     """
     YOLO 损失函数计算（支持 batch 维度）
     
@@ -281,8 +281,8 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
 
 
     # 激活函数
-    pred_best_xy = torch.sigmoid(pred_best_xy)  # 限制xy在0-1范围内
-    pred_best_wh = torch.exp(pred_best_wh)      # 确保宽高为正值
+    # pred_best_xy = torch.sigmoid(pred_best_xy)  # 限制xy在0-1范围内
+    # pred_best_wh = torch.exp(pred_best_wh)      # 确保宽高为正值
     pred_best_conf = torch.sigmoid(pred_best_conf)
     target_best_conf = torch.sigmoid(target_best_conf)
     pred_class_probs = torch.sigmoid(pred_class_probs)  # 类别概率使用 sigmoid 激活函数
@@ -303,6 +303,7 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
     # 计算分类损失（仅对目标存在的网格）
     class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
 
+    print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), noobj_conf_loss.item(), class_loss.item())
     # 最终总损失
     total_loss = (
         lambda_coord * xy_loss +       # 坐标损失
@@ -352,9 +353,32 @@ def yolo_accuracy(predictions, targets, C=20):
     # 仅计算存在目标的网格的分类正确率
     correct = (pred_class[obj_mask] == true_class[obj_mask]).float().sum()
     total = obj_mask.sum().float()
-    
     accuracy = correct / total
-    return accuracy
+    
+    # 计算位置准确度 - 使用相对误差的倒数，并处理除零情况
+    position_pred = predictions[..., C:C+2]  # 只取xy坐标
+    position_target = targets[..., C:C+2]    # 真实xy坐标
+    # 添加小值防止除零
+    epsilon = 1e-6
+    # 计算相对误差并转换为准确度值
+    xy_error = torch.abs(position_pred - position_target) / (torch.abs(position_target) + epsilon)
+    xy_error = xy_error[obj_mask].mean()  # 使用mean代替sum/total更直观
+    # 将误差转换为0-1范围的准确度值
+    xy_accuracy = torch.clamp(1.0 - xy_error, 0.0, 1.0)
+
+    # 同样处理宽高误差
+    wh_pred = predictions[..., C+2:C+4]
+    wh_target = targets[..., C+2:C+4]
+    wh_error = torch.abs(wh_pred - wh_target) / (torch.abs(wh_target) + epsilon)
+    wh_accuracy = torch.clamp(1.0 - wh_error[obj_mask].mean(), 0.0, 1.0)
+
+    # 置信度准确度
+    conf_error = torch.abs(predictions[..., C+4] - targets[..., C+4]) / (torch.abs(targets[..., C+4]) + epsilon)
+    conf_accuracy = torch.clamp(1.0 - conf_error[obj_mask].mean(), 0.0, 1.0)
+
+    # 返回综合准确度（可以加权平均）
+    return torch.tensor([accuracy.item(), xy_accuracy.item(), wh_accuracy.item(), conf_accuracy.item()])
+
 
 def yolo_accuracy_v3(pred, target, C=20):
     # 假设 pred 和 target 是三个尺度的预测和目标
