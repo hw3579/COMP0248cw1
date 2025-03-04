@@ -217,8 +217,14 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
     target_wh = target_boxes[..., 2:4]   # (N, Sy, Sx, B, 2)
     target_conf = target_boxes[..., 4:5] # (N, Sy, Sx, B, 1)
 
+    pred_class_probs = torch.clamp(pred_class_probs, 0.0, 1.0)
+
+
     # 计算 IoU 以选择最佳匹配的边界框
     iou_scores = bbox_iou(target_boxes[..., :4], pred_boxes[..., :4])  # 形状 (N, Sy, Sx, B)
+    # 处理可能的NaN或Inf值
+    iou_scores = torch.nan_to_num(iou_scores, nan=0.0, posinf=1.0, neginf=0.0)
+
     best_iou, best_bbox = iou_scores.max(dim=-1, keepdim=True)  # 形状 (N, Sy, Sx, 1)
     # 例如 best_bbox[i][j][k][0] = 1 表示第 2 个边界框是最佳匹配
     # best_bbox[i][j][k][0] = 0 表示第 1 个边界框是最佳匹配
@@ -246,12 +252,17 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
         reduction='sum'
     )
 
+    # 确保置信度值在[0,1]范围内
+    pred_best_conf = torch.clamp(pred_best_conf, 0.0, 1.0)
+    target_best_conf = torch.clamp(target_best_conf, 0.0, 1.0)
+
+
     # 计算置信度损失（分目标与无目标部分）
-    obj_conf_loss = F.mse_loss(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
-    noobj_conf_loss = F.mse_loss(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='sum')
+    obj_conf_loss = F.binary_cross_entropy(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
+    noobj_conf_loss = F.binary_cross_entropy(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='sum')
 
     # 计算分类损失（仅对目标存在的网格）
-    class_loss = F.mse_loss(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
+    class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
 
     # 最终总损失
     total_loss = (
