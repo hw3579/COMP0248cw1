@@ -185,10 +185,10 @@ class Yolov3(nn.Module):
         pred2_out[..., self.C+4] = torch.sigmoid(pred2_out[..., self.C+4])
         pred3_out[..., self.C+4] = torch.sigmoid(pred3_out[..., self.C+4])
 
-        # 对xy坐标执行sigmoid
-        pred1_out[..., self.C:self.C+2] = torch.sigmoid(pred1_out[..., self.C:self.C+2])
-        pred2_out[..., self.C:self.C+2] = torch.sigmoid(pred2_out[..., self.C:self.C+2])
-        pred3_out[..., self.C:self.C+2] = torch.sigmoid(pred3_out[..., self.C:self.C+2])
+        # 对xy坐标执行relu
+        pred1_out[..., self.C:self.C+2] = torch.relu(pred1_out[..., self.C:self.C+2])
+        pred2_out[..., self.C:self.C+2] = torch.relu(pred2_out[..., self.C:self.C+2])
+        pred3_out[..., self.C:self.C+2] = torch.relu(pred3_out[..., self.C:self.C+2])
 
         # 对wh尺寸应用激活函数
         # 选项1: 使用exp (标准YOLOv3做法)
