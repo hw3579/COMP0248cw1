@@ -54,9 +54,9 @@ with torch.no_grad():
         outputs = labels
         # outputs = model(images)
 
-        loss = yolo_loss_funcv3(outputs, labels, w/32, h/32, C=5)
+        loss = yolo_loss_funcv3(outputs, labels, w/32, h/32, B=model.B, C=model.C)
         total_loss.append(loss.item())
-        batch_acc = yolo_accuracy_v3(outputs, labels, C=5)
+        batch_acc = yolo_accuracy_v3(outputs, labels, C=model.C)
         total_acc.append(batch_acc.item())
 
         print('loss', loss.item(), 'acc', batch_acc.item())
@@ -82,7 +82,7 @@ with torch.no_grad():
                 #     for _j in range(position_class.shape[1]):
                 #         for _c in range(5):
                 #             if position_class[_i][_j][_c] >0.5:
-                                if position_xywh_bbox1[_i][_j][4] > position_xywh_bbox2[_i][_j][4]:
+                                if True: #position_xywh_bbox1[_i][_j][4] > position_xywh_bbox2[_i][_j][4]:
                                     bbox_better = position_xywh_bbox1[_i][_j]
                                 else:
                                     bbox_better = position_xywh_bbox2[_i][_j]

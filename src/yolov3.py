@@ -270,7 +270,7 @@ def yolo_loss_funcv3(pred, target, Sx, Sy, B=2, C=20):
     medium_cell = yolo_loss_funcv3_1(pred[1], target[1], Sx=Sx*2, Sy=Sy*2, B=B, C=C)
     small_cell = yolo_loss_funcv3_1(pred[2], target[2], Sx=Sx*4, Sy=Sy*4, B=B, C=C)
     
-    return large_cell + medium_cell + small_cell
+    return 0.4 * large_cell + 0.4 * medium_cell + 0.2 * small_cell
 
 
 
@@ -337,22 +337,25 @@ import platform # for CS GPU
 if __name__ == '__main__':
     # test_ResUnit() # 1, 32, 416, 416
     # test_ResUnitX() # 1, 64, 208, 208
-    test_Yolov3() # 1, 5, 13, 13
+    # test_Yolov3() # 1, 5, 13, 13
 
     # 960, 720 -> 30, 23 & 60, 45 & 120, 90
 
 
-    is_use_autoscale = True
+    is_use_autoscale = False
 
-    train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
+    train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=transform, target_transform=None, version="yolov3")
 
     if is_use_autoscale:
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
         if platform.system() == 'Linux':
-            train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True)
+            train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=12, pin_memory=True, persistent_workers=True)
     else:
-        train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
+        if platform.system() == 'Windows':
+            train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=4)
+        if platform.system() == 'Linux':
+            train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=12)
 
 
     data = train_dataset[0]
@@ -422,7 +425,7 @@ if __name__ == '__main__':
                 pred = model(images)
                 # pred = labels
 
-                loss = yolo_loss_funcv3(pred, labels, w/32, h/32, model.C)
+                loss = yolo_loss_funcv3(pred, labels, w/32, h/32, model.B, model.C)
                 loss.backward()
                 optimizer.step()
 
