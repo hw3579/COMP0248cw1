@@ -175,31 +175,31 @@ class Yolov3(nn.Module):
         pred2_out = pred2_out.permute(0, 2, 3, 1)
         pred3_out = pred3_out.permute(0, 2, 3, 1)
 
-        # # 对概率位置执行sigmoid
-        # pred1_out[..., :self.C] = torch.sigmoid(pred1_out[..., :self.C])
-        # pred2_out[..., :self.C] = torch.sigmoid(pred2_out[..., :self.C])
-        # pred3_out[..., :self.C] = torch.sigmoid(pred3_out[..., :self.C])
+        # 对概率位置执行sigmoid
+        pred1_out[..., :self.C] = torch.sigmoid(pred1_out[..., :self.C])
+        pred2_out[..., :self.C] = torch.sigmoid(pred2_out[..., :self.C])
+        pred3_out[..., :self.C] = torch.sigmoid(pred3_out[..., :self.C])
 
-        # # 对置信度执行sigmoid
-        # pred1_out[..., self.C+4] = torch.sigmoid(pred1_out[..., self.C+4])
-        # pred2_out[..., self.C+4] = torch.sigmoid(pred2_out[..., self.C+4])
-        # pred3_out[..., self.C+4] = torch.sigmoid(pred3_out[..., self.C+4])
+        # 对置信度执行sigmoid
+        pred1_out[..., self.C+4] = torch.sigmoid(pred1_out[..., self.C+4])
+        pred2_out[..., self.C+4] = torch.sigmoid(pred2_out[..., self.C+4])
+        pred3_out[..., self.C+4] = torch.sigmoid(pred3_out[..., self.C+4])
 
         # # 对xy坐标执行relu
         # # pred1_out[..., self.C:self.C+2] = torch.relu(pred1_out[..., self.C:self.C+2])
         # # pred2_out[..., self.C:self.C+2] = torch.relu(pred2_out[..., self.C:self.C+2])
         # # pred3_out[..., self.C:self.C+2] = torch.relu(pred3_out[..., self.C:self.C+2])
 
-        # # 使用sigmod 
-        # pred1_out[..., self.C:self.C+2] = torch.sigmoid(pred1_out[..., self.C:self.C+2])
-        # pred2_out[..., self.C:self.C+2] = torch.sigmoid(pred2_out[..., self.C:self.C+2])
-        # pred3_out[..., self.C:self.C+2] = torch.sigmoid(pred3_out[..., self.C:self.C+2])
+        # 使用sigmod 
+        pred1_out[..., self.C:self.C+2] = torch.sigmoid(pred1_out[..., self.C:self.C+2])
+        pred2_out[..., self.C:self.C+2] = torch.sigmoid(pred2_out[..., self.C:self.C+2])
+        pred3_out[..., self.C:self.C+2] = torch.sigmoid(pred3_out[..., self.C:self.C+2])
 
-        # # 对wh尺寸应用激活函数
-        # # 选项1: 使用exp (标准YOLOv3做法)
-        # pred1_out[..., self.C+2:self.C+4] = torch.exp(pred1_out[..., self.C+2:self.C+4])
-        # pred2_out[..., self.C+2:self.C+4] = torch.exp(pred2_out[..., self.C+2:self.C+4])
-        # pred3_out[..., self.C+2:self.C+4] = torch.exp(pred3_out[..., self.C+2:self.C+4])
+        # 对wh尺寸应用激活函数
+        # 选项1: 使用exp (标准YOLOv3做法)
+        pred1_out[..., self.C+2:self.C+4] = torch.exp(pred1_out[..., self.C+2:self.C+4])
+        pred2_out[..., self.C+2:self.C+4] = torch.exp(pred2_out[..., self.C+2:self.C+4])
+        pred3_out[..., self.C+2:self.C+4] = torch.exp(pred3_out[..., self.C+2:self.C+4])
 
         
         return pred1_out, pred2_out, pred3_out
@@ -231,130 +231,159 @@ def test_Yolov3():
 
 from train import bbox_iou
 
+# def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=5, lambda_noobj=0.5):
+#     """
+#     YOLO 损失函数计算（支持 batch 维度）
+    
+#     参数：
+#         predictions: 模型预测值, 形状 (N, Sy, Sx, C + B*5)
+#         targets: 真实标签, 形状 (N, Sy, Sx, C + B*5)
+#         Sx: 网格水平方向划分数
+#         Sy: 网格垂直方向划分数
+#         B: 每个网格预测的边界框数量
+#         C: 类别数
+#         lambda_coord: 坐标损失系数
+#         lambda_noobj: 无目标置信度损失系数
+
+#     返回：
+#         total_loss: 总损失
+#     """
+#     assert predictions.shape == targets.shape, "预测值与目标值形状不一致"
+#     assert predictions.shape[-1] == C + B * 5, "预测值与目标值通道数不一致"
+
+#     # assert torch.all(predictions[..., :C] <= 1) and torch.all(predictions[..., :C] >= 0), "类别概率应在 0~1 之间"
+#     # assert torch.all(predictions[..., C:C+B*5:5] <= 1) and torch.all(predictions[..., C:C+B*5:5] >= 0), "置信度应在 0~1 之间"
+
+#     # assert torch.all(targets[..., :C] <= 1) and torch.all(targets[..., :C] >= 0), "类别概率应在 0~1 之间"
+#     # assert torch.all(targets[..., C:C+B*5:5] <= 1) and torch.all(targets[..., C:C+B*5:5] >= 0), "置信度应在 0~1 之间"
+
+
+
+
+#     Sx = math.ceil(Sx)
+#     Sy = math.ceil(Sy)
+
+#     batch = predictions.shape[0]  # 获取 batch 大小
+
+#     # 提取类别概率
+#     pred_class_probs = predictions[..., :C]  # (N, Sy, Sx, C)
+#     target_class_probs = targets[..., :C]      # (N, Sy, Sx, C)
+
+#     # 提取目标掩码
+#     # 此处假设每个 box 信息占 5 个通道，目标存在则置信度 > 0
+#     obj_mask = (targets[..., C+4::5].max(dim=-1, keepdim=True)[0] > 0).float()  # (N, Sy, Sx, 1)
+#     noobj_mask = 1 - obj_mask  # (N, Sy, Sx, 1)
+
+#     # 将真实边界框 reshape 为 (N, Sy, Sx, B, 5)
+#     target_boxes = targets[..., C:].view(batch, Sy, Sx, B, 5)
+#     # 同理，将预测边界框 reshape 为 (N, Sy, Sx, B, 5)
+#     pred_boxes = predictions[..., C:].view(batch, Sy, Sx, B, 5)
+
+#     pred_xy = pred_boxes[..., :2]   # (N, Sy, Sx, B, 2)
+#     pred_wh = pred_boxes[..., 2:4]   # (N, Sy, Sx, B, 2)
+#     pred_conf = pred_boxes[..., 4:5] # (N, Sy, Sx, B, 1)
+
+#     target_xy = target_boxes[..., :2]   # (N, Sy, Sx, B, 2)
+#     target_wh = target_boxes[..., 2:4]   # (N, Sy, Sx, B, 2)
+#     target_conf = target_boxes[..., 4:5] # (N, Sy, Sx, B, 1)
+
+
+
+
+#     # 计算 IoU 以选择最佳匹配的边界框
+#     iou_scores = bbox_iou(target_boxes[..., :4], pred_boxes[..., :4])  # 形状 (N, Sy, Sx, B)
+#     # 处理可能的NaN或Inf值
+#     iou_scores = torch.nan_to_num(iou_scores, nan=0.0, posinf=1.0, neginf=0.0)
+
+#     best_iou, best_bbox = iou_scores.max(dim=-1, keepdim=True)  # 形状 (N, Sy, Sx, 1)
+#     # 例如 best_bbox[i][j][k][0] = 1 表示第 2 个边界框是最佳匹配
+#     # best_bbox[i][j][k][0] = 0 表示第 1 个边界框是最佳匹配
+
+#     assert best_bbox.shape == (batch, Sy, Sx, 1)
+
+#     # 扩展目标掩码到边界框维度，此处先对 best_bbox 进行 one-hot 编码
+#     best_bbox_mask = F.one_hot(best_bbox.squeeze(-1), B).unsqueeze(-1).float()  # (N, Sy, Sx, B, 1)
+#     assert best_bbox_mask.shape == (batch, Sy, Sx, B, 1)
+
+#     # 根据 best_bbox_mask 从 B 个 box 中提取最佳的框信息（对 B 维求和）
+#     pred_best_xy   = (best_bbox_mask * pred_xy).sum(dim=-2)  # (N, Sy, Sx, 2)
+#     pred_best_wh   = (best_bbox_mask * pred_wh).sum(dim=-2)  # (N, Sy, Sx, 2)
+#     pred_best_conf = (best_bbox_mask * pred_conf).sum(dim=-2)  # (N, Sy, Sx, 1)
+
+#     target_best_xy   = (best_bbox_mask * target_xy).sum(dim=-2)  # (N, Sy, Sx, 2)
+#     target_best_wh   = (best_bbox_mask * target_wh).sum(dim=-2)  # (N, Sy, Sx, 2)
+#     target_best_conf = (best_bbox_mask * target_conf).sum(dim=-2)  # (N, Sy, Sx, 1)
+
+
+
+#     pred_best_xy = torch.sigmoid(pred_best_xy)
+#     pred_best_wh = torch.exp(pred_best_wh)
+#     pred_best_conf = torch.sigmoid(pred_best_conf)
+#     pred_class_probs = torch.sigmoid(pred_class_probs)
+
+#     # 计算坐标损失（仅计算目标框的损失）
+#     xy_loss = F.binary_cross_entropy(obj_mask * pred_best_xy, obj_mask * target_best_xy, reduction='sum')
+#     wh_loss = F.mse_loss(
+#         obj_mask * torch.sqrt(torch.clamp(pred_best_wh, min=0) + 1e-6),
+#         obj_mask * torch.sqrt(torch.clamp(target_best_wh, min=0) + 1e-6),
+#         reduction='sum'
+        
+#     )
+
+#     # Assert to ensure inputs to BCE are in range [0, 1]
+#     # assert torch.all((obj_mask * pred_best_conf >= 0) & (obj_mask * pred_best_conf <= 1)), "Predicted confidence values must be between 0 and 1"
+#     # assert torch.all((obj_mask * target_best_conf >= 0) & (obj_mask * target_best_conf <= 1)), "Target confidence values must be between 0 and 1"
+#     # assert torch.all((obj_mask * pred_class_probs >= 0) & (obj_mask * pred_class_probs <= 1)), "Predicted class probabilities must be between 0 and 1"
+#     # assert torch.all((obj_mask * target_class_probs >= 0) & (obj_mask * target_class_probs <= 1)), "Target class probabilities must be between 0 and 1"
+
+
+#     # 计算置信度损失（分目标与无目标部分）
+#     obj_conf_loss = F.binary_cross_entropy(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
+#     noobj_conf_loss = F.binary_cross_entropy(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='sum')
+
+#     # 计算分类损失（仅对目标存在的网格）
+#     class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
+
+#     print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), class_loss.item())
+#     # 最终总损失
+#     total_loss = (
+#         lambda_coord * xy_loss +       # 坐标损失
+#         lambda_coord * wh_loss +       # 宽高损失
+#         obj_conf_loss +                # 目标置信度损失
+#         lambda_noobj * noobj_conf_loss +# 无目标置信度损失
+#         class_loss                     # 分类损失
+#     )
+
+#     return total_loss
+
+
 def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=5, lambda_noobj=0.5):
     """
     YOLO 损失函数计算（支持 batch 维度）
-    
-    参数：
-        predictions: 模型预测值, 形状 (N, Sy, Sx, C + B*5)
-        targets: 真实标签, 形状 (N, Sy, Sx, C + B*5)
-        Sx: 网格水平方向划分数
-        Sy: 网格垂直方向划分数
-        B: 每个网格预测的边界框数量
-        C: 类别数
-        lambda_coord: 坐标损失系数
-        lambda_noobj: 无目标置信度损失系数
-
-    返回：
-        total_loss: 总损失
     """
-    assert predictions.shape == targets.shape, "预测值与目标值形状不一致"
-    assert predictions.shape[-1] == C + B * 5, "预测值与目标值通道数不一致"
-
-    # assert torch.all(predictions[..., :C] <= 1) and torch.all(predictions[..., :C] >= 0), "类别概率应在 0~1 之间"
-    # assert torch.all(predictions[..., C:C+B*5:5] <= 1) and torch.all(predictions[..., C:C+B*5:5] >= 0), "置信度应在 0~1 之间"
-
-    # assert torch.all(targets[..., :C] <= 1) and torch.all(targets[..., :C] >= 0), "类别概率应在 0~1 之间"
-    # assert torch.all(targets[..., C:C+B*5:5] <= 1) and torch.all(targets[..., C:C+B*5:5] >= 0), "置信度应在 0~1 之间"
-
-
-
-
-    Sx = math.ceil(Sx)
-    Sy = math.ceil(Sy)
-
     batch = predictions.shape[0]  # 获取 batch 大小
 
-    # 提取类别概率
-    pred_class_probs = predictions[..., :C]  # (N, Sy, Sx, C)
-    target_class_probs = targets[..., :C]      # (N, Sy, Sx, C)
+    # predictions[..., :C] = torch.sigmoid(predictions[..., :C])
+    # predictions[..., C+4:C+4+B*5:5] = torch.sigmoid(predictions[..., C+4:4+C+B*5:5])
 
-    # 提取目标掩码
-    # 此处假设每个 box 信息占 5 个通道，目标存在则置信度 > 0
-    obj_mask = (targets[..., C+4::5].max(dim=-1, keepdim=True)[0] > 0).float()  # (N, Sy, Sx, 1)
-    noobj_mask = 1 - obj_mask  # (N, Sy, Sx, 1)
+    # 类别损失
+    class_loss = F.binary_cross_entropy(predictions[..., :C], targets[..., :C], reduction='sum')
 
-    # 将真实边界框 reshape 为 (N, Sy, Sx, B, 5)
-    target_boxes = targets[..., C:].view(batch, Sy, Sx, B, 5)
-    # 同理，将预测边界框 reshape 为 (N, Sy, Sx, B, 5)
-    pred_boxes = predictions[..., C:].view(batch, Sy, Sx, B, 5)
-
-    pred_xy = pred_boxes[..., :2]   # (N, Sy, Sx, B, 2)
-    pred_wh = pred_boxes[..., 2:4]   # (N, Sy, Sx, B, 2)
-    pred_conf = pred_boxes[..., 4:5] # (N, Sy, Sx, B, 1)
-
-    target_xy = target_boxes[..., :2]   # (N, Sy, Sx, B, 2)
-    target_wh = target_boxes[..., 2:4]   # (N, Sy, Sx, B, 2)
-    target_conf = target_boxes[..., 4:5] # (N, Sy, Sx, B, 1)
-
-
-
-
-    # 计算 IoU 以选择最佳匹配的边界框
-    iou_scores = bbox_iou(target_boxes[..., :4], pred_boxes[..., :4])  # 形状 (N, Sy, Sx, B)
-    # 处理可能的NaN或Inf值
-    iou_scores = torch.nan_to_num(iou_scores, nan=0.0, posinf=1.0, neginf=0.0)
-
-    best_iou, best_bbox = iou_scores.max(dim=-1, keepdim=True)  # 形状 (N, Sy, Sx, 1)
-    # 例如 best_bbox[i][j][k][0] = 1 表示第 2 个边界框是最佳匹配
-    # best_bbox[i][j][k][0] = 0 表示第 1 个边界框是最佳匹配
-
-    assert best_bbox.shape == (batch, Sy, Sx, 1)
-
-    # 扩展目标掩码到边界框维度，此处先对 best_bbox 进行 one-hot 编码
-    best_bbox_mask = F.one_hot(best_bbox.squeeze(-1), B).unsqueeze(-1).float()  # (N, Sy, Sx, B, 1)
-    assert best_bbox_mask.shape == (batch, Sy, Sx, B, 1)
-
-    # 根据 best_bbox_mask 从 B 个 box 中提取最佳的框信息（对 B 维求和）
-    pred_best_xy   = (best_bbox_mask * pred_xy).sum(dim=-2)  # (N, Sy, Sx, 2)
-    pred_best_wh   = (best_bbox_mask * pred_wh).sum(dim=-2)  # (N, Sy, Sx, 2)
-    pred_best_conf = (best_bbox_mask * pred_conf).sum(dim=-2)  # (N, Sy, Sx, 1)
-
-    target_best_xy   = (best_bbox_mask * target_xy).sum(dim=-2)  # (N, Sy, Sx, 2)
-    target_best_wh   = (best_bbox_mask * target_wh).sum(dim=-2)  # (N, Sy, Sx, 2)
-    target_best_conf = (best_bbox_mask * target_conf).sum(dim=-2)  # (N, Sy, Sx, 1)
-
-
-
-    pred_best_xy = torch.sigmoid(pred_best_xy)
-    pred_best_wh = torch.exp(pred_best_wh)
-    pred_best_conf = torch.sigmoid(pred_best_conf)
-    pred_class_probs = torch.sigmoid(pred_class_probs)
-
-    # 计算坐标损失（仅计算目标框的损失）
-    xy_loss = F.binary_cross_entropy(obj_mask * pred_best_xy, obj_mask * target_best_xy, reduction='sum')
-    wh_loss = F.mse_loss(
-        obj_mask * torch.sqrt(torch.clamp(pred_best_wh, min=0) + 1e-6),
-        obj_mask * torch.sqrt(torch.clamp(target_best_wh, min=0) + 1e-6),
-        reduction='sum'
-        
+    # 计算坐标损失
+    coord_loss = lambda_coord * (
+        F.mse_loss(predictions[..., C:C+2], targets[..., C:C+2], reduction='sum') +
+        F.mse_loss(torch.sqrt(torch.abs(predictions[..., C+2:C+4] + 1e-6)), torch.sqrt(torch.abs(targets[..., C+2:C+4] + 1e-6)), reduction='sum')
     )
 
-    # Assert to ensure inputs to BCE are in range [0, 1]
-    # assert torch.all((obj_mask * pred_best_conf >= 0) & (obj_mask * pred_best_conf <= 1)), "Predicted confidence values must be between 0 and 1"
-    # assert torch.all((obj_mask * target_best_conf >= 0) & (obj_mask * target_best_conf <= 1)), "Target confidence values must be between 0 and 1"
-    # assert torch.all((obj_mask * pred_class_probs >= 0) & (obj_mask * pred_class_probs <= 1)), "Predicted class probabilities must be between 0 and 1"
-    # assert torch.all((obj_mask * target_class_probs >= 0) & (obj_mask * target_class_probs <= 1)), "Target class probabilities must be between 0 and 1"
+    # 置信度损失
+    obj_loss = F.binary_cross_entropy(predictions[..., C+4], targets[..., C+4], reduction='sum')
+    noobj_loss = lambda_noobj * F.binary_cross_entropy(predictions[..., C+4] * (1 - targets[..., C+4]), targets[..., C+4] * (1 - targets[..., C+4]), reduction='sum')
 
-
-    # 计算置信度损失（分目标与无目标部分）
-    obj_conf_loss = F.binary_cross_entropy(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
-    noobj_conf_loss = F.binary_cross_entropy(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='sum')
-
-    # 计算分类损失（仅对目标存在的网格）
-    class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
-
-    print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), class_loss.item())
-    # 最终总损失
-    total_loss = (
-        lambda_coord * xy_loss +       # 坐标损失
-        lambda_coord * wh_loss +       # 宽高损失
-        obj_conf_loss +                # 目标置信度损失
-        lambda_noobj * noobj_conf_loss +# 无目标置信度损失
-        class_loss                     # 分类损失
-    )
-
+    # 总损失
+    total_loss = class_loss + coord_loss + obj_loss + noobj_loss
     return total_loss
+
+
 
 def yolo_loss_funcv3(pred, target, Sx, Sy, B=2, C=20):
     # 假设 pred 和 target 是三个尺度的预测和目标
@@ -403,11 +432,11 @@ def yolo_accuracy(predictions, targets, C=20):
     position_target = targets[..., C:C+2]    # 真实xy坐标
     # 添加小值防止除零
     epsilon = 1e-6
-    # 计算相对误差并转换为准确度值
-    xy_error = torch.abs(position_pred - position_target) / (torch.abs(position_target) + epsilon)
-    xy_error = xy_error[obj_mask].mean()  # 使用mean代替sum/total更直观
-    # 将误差转换为0-1范围的准确度值
-    xy_accuracy = torch.clamp(1.0 - xy_error, 0.0, 1.0)
+    
+    # 更稳健的xy精度计算
+    xy_diff = torch.abs(position_pred[obj_mask] - position_target[obj_mask])
+    # 使用绝对误差而非相对误差
+    xy_accuracy = torch.clamp(1.0 - xy_diff.mean(), 0.0, 1.0)
 
     # 同样处理宽高误差
     wh_pred = predictions[..., C+2:C+4]
@@ -493,7 +522,7 @@ if __name__ == '__main__':
     model.to(device)
     model.train()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 #     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 #     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
 #     optimizer, mode='min', factor=0.5, patience=5
@@ -541,8 +570,8 @@ if __name__ == '__main__':
                     # 为下一次迭代更新scaler
                     scaler.update()
             else:
-                # pred = model(images)
-                pred = labels
+                pred = model(images)
+                # pred = labels
 
                 loss = yolo_loss_funcv3(pred, labels, w/32, h/32, model.B, model.C)
                 loss.backward()
