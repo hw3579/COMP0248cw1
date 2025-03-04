@@ -289,27 +289,27 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
 
 
     # 计算坐标损失（仅计算目标框的损失）
-    xy_loss = F.mse_loss(obj_mask * pred_best_xy, obj_mask * target_best_xy, reduction='sum')
+    xy_loss = F.mse_loss(obj_mask * pred_best_xy, obj_mask * target_best_xy)
     wh_loss = F.mse_loss(
         obj_mask * torch.sqrt(torch.clamp(pred_best_wh, min=0) + 1e-6),
-        obj_mask * torch.sqrt(torch.clamp(target_best_wh, min=0) + 1e-6),
-        reduction='sum'
+        obj_mask * torch.sqrt(torch.clamp(target_best_wh, min=0) + 1e-6)
+        
     )
 
     # 计算置信度损失（分目标与无目标部分）
-    obj_conf_loss = F.binary_cross_entropy(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
-    noobj_conf_loss = F.binary_cross_entropy(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='sum')
+    obj_conf_loss = F.binary_cross_entropy(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='mean')
+    noobj_conf_loss = F.binary_cross_entropy(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='mean')
 
     # 计算分类损失（仅对目标存在的网格）
-    class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
+    class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='mean')
 
-    print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), noobj_conf_loss.item(), class_loss.item())
+    # print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), class_loss.item())
     # 最终总损失
     total_loss = (
         lambda_coord * xy_loss +       # 坐标损失
         lambda_coord * wh_loss +       # 宽高损失
         obj_conf_loss +                # 目标置信度损失
-        lambda_noobj * noobj_conf_loss +# 无目标置信度损失
+        # lambda_noobj * noobj_conf_loss +# 无目标置信度损失
         class_loss                     # 分类损失
     )
 
@@ -507,7 +507,7 @@ if __name__ == '__main__':
 
             # 使用刚刚定义的 yolo_accuracy 计算存在目标格子的分类准确率
             batch_acc = yolo_accuracy_v3(pred, labels, model.C)
-            acc_per_epoch += batch_acc.item()
+            acc_per_epoch += batch_acc
 
         loss_per_epoch /= len(train_loader)
         acc_per_epoch /= len(train_loader)
@@ -516,7 +516,7 @@ if __name__ == '__main__':
         # scheduler.step(loss_per_epoch)  # 这里使用训练损失调整学习率（可改为 val_loss）
 
         # **打印日志**
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss_per_epoch:.4f}, Accuracy: {acc_per_epoch:.4f}")
+        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss_per_epoch:.4f}, Accuracy: {acc_per_epoch}")
         print(f"Current Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
 
         total_loss.append(loss_per_epoch)
@@ -540,6 +540,7 @@ if __name__ == '__main__':
     # 保存模型及训练指标
     torch.save(model, 'results/full_model_yolov3_optimize3.pth')
     import json
+    total_acc = [acc.item() for acc in total_acc]
     data = {
         'loss': total_loss,
         'accuracy': total_acc
