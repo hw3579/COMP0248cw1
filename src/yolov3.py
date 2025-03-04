@@ -91,6 +91,40 @@ class Yolov3(nn.Module):
         self.pred3_cbl = CBL(224, 448, 3, 1, 1)
         self.pred3_conv = nn.Conv2d(448, self.out_channels, 1, 1, 0)
 
+        self._initialize_weights()
+
+
+    def _initialize_weights(self):
+        """初始化网络权重，确保输出在合理范围内"""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                # 对大多数卷积层使用He/Kaiming初始化
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0)
+        
+        # 特别处理预测层的卷积（这些层直接输出边界框参数和置信度）
+        for pred_layer in [self.pred1_conv, self.pred2_conv, self.pred3_conv]:
+            # 对于输出层，使用较小方差的初始化，使初始输出接近零
+            nn.init.normal_(pred_layer.weight, mean=0.0, std=0.01)
+            if pred_layer.bias is not None:
+                # 为类别和置信度通道设置特殊初始值
+                # 对于sigmoid激活函数，设置为0表示初始输出为0.5
+                nn.init.constant_(pred_layer.bias, 0.0)
+                
+                # 可选：为置信度通道设置负偏置，使初始置信度较低
+                # 以下代码设置置信度通道的初始偏置为-2，使sigmoid输出约为0.12
+                for i in range(self.B):
+                    # 假设每个边界框有5个值(x,y,w,h,conf)，类别在前面
+                    conf_index = self.C + i * 5 + 4
+                    if conf_index < len(pred_layer.bias):
+                        # 设置所有置信度通道的偏置
+                        pred_layer.bias.data[conf_index::self.out_channels] = -2.0
+ 
+
     def _CBLset(self, in_channels):
         return nn.Sequential(
             CBL(in_channels, in_channels//2, 1, 1, 0),
@@ -170,7 +204,7 @@ def test_Yolov3():
 
 from train import bbox_iou
 
-def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=5, lambda_noobj=0.5):
+def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=5, lambda_noobj=0.1):
     """
     YOLO 损失函数计算（支持 batch 维度）
     
@@ -217,7 +251,7 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
     target_wh = target_boxes[..., 2:4]   # (N, Sy, Sx, B, 2)
     target_conf = target_boxes[..., 4:5] # (N, Sy, Sx, B, 1)
 
-    pred_class_probs = torch.clamp(pred_class_probs, 0.0, 1.0)
+
 
 
     # 计算 IoU 以选择最佳匹配的边界框
@@ -244,6 +278,16 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
     target_best_wh   = (best_bbox_mask * target_wh).sum(dim=-2)  # (N, Sy, Sx, 2)
     target_best_conf = (best_bbox_mask * target_conf).sum(dim=-2)  # (N, Sy, Sx, 1)
 
+
+
+    # 激活函数
+    pred_best_xy = torch.sigmoid(pred_best_xy)  # 限制xy在0-1范围内
+    pred_best_wh = torch.exp(pred_best_wh)      # 确保宽高为正值
+    pred_best_conf = torch.sigmoid(pred_best_conf)
+    target_best_conf = torch.sigmoid(target_best_conf)
+    pred_class_probs = torch.sigmoid(pred_class_probs)  # 类别概率使用 sigmoid 激活函数
+
+
     # 计算坐标损失（仅计算目标框的损失）
     xy_loss = F.mse_loss(obj_mask * pred_best_xy, obj_mask * target_best_xy, reduction='sum')
     wh_loss = F.mse_loss(
@@ -251,11 +295,6 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
         obj_mask * torch.sqrt(torch.clamp(target_best_wh, min=0) + 1e-6),
         reduction='sum'
     )
-
-    # 确保置信度值在[0,1]范围内
-    pred_best_conf = torch.clamp(pred_best_conf, 0.0, 1.0)
-    target_best_conf = torch.clamp(target_best_conf, 0.0, 1.0)
-
 
     # 计算置信度损失（分目标与无目标部分）
     obj_conf_loss = F.binary_cross_entropy(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
@@ -355,7 +394,7 @@ if __name__ == '__main__':
 
     is_use_autoscale = False
 
-    train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=transform, target_transform=None, version="yolov3")
+    train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
 
     if is_use_autoscale:
         if platform.system() == 'Windows':
