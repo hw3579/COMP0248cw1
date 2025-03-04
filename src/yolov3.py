@@ -315,8 +315,14 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
     target_best_conf = (best_bbox_mask * target_conf).sum(dim=-2)  # (N, Sy, Sx, 1)
 
 
+
+    pred_best_xy = torch.sigmoid(pred_best_xy)
+    pred_best_wh = torch.exp(pred_best_wh)
+    pred_best_conf = torch.sigmoid(pred_best_conf)
+    pred_class_probs = torch.sigmoid(pred_class_probs)
+
     # 计算坐标损失（仅计算目标框的损失）
-    xy_loss = F.mse_loss(obj_mask * pred_best_xy, obj_mask * target_best_xy, reduction='sum')
+    xy_loss = F.binary_cross_entropy(obj_mask * pred_best_xy, obj_mask * target_best_xy, reduction='sum')
     wh_loss = F.mse_loss(
         obj_mask * torch.sqrt(torch.clamp(pred_best_wh, min=0) + 1e-6),
         obj_mask * torch.sqrt(torch.clamp(target_best_wh, min=0) + 1e-6),
@@ -332,11 +338,11 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
 
 
     # 计算置信度损失（分目标与无目标部分）
-    obj_conf_loss = F.mse_loss(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
-    # noobj_conf_loss = F.binary_cross_entropy(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='sum')
+    obj_conf_loss = F.binary_cross_entropy(obj_mask * pred_best_conf, obj_mask * target_best_conf, reduction='sum')
+    noobj_conf_loss = F.binary_cross_entropy(noobj_mask * pred_best_conf, noobj_mask * target_best_conf, reduction='sum')
 
     # 计算分类损失（仅对目标存在的网格）
-    class_loss = F.mse_loss(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
+    class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
 
     # print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), class_loss.item())
     # 最终总损失
@@ -344,7 +350,7 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
         lambda_coord * xy_loss +       # 坐标损失
         lambda_coord * wh_loss +       # 宽高损失
         obj_conf_loss +                # 目标置信度损失
-        # lambda_noobj * noobj_conf_loss +# 无目标置信度损失
+        lambda_noobj * noobj_conf_loss +# 无目标置信度损失
         class_loss                     # 分类损失
     )
 
@@ -357,7 +363,7 @@ def yolo_loss_funcv3(pred, target, Sx, Sy, B=2, C=20):
     small_cell = yolo_loss_funcv3_1(pred[2], target[2], Sx=Sx*4, Sy=Sy*4, B=B, C=C)
     
     # print(large_cell.item(), medium_cell.item(), small_cell.item())
-    # return small_cell
+    # return large_cell
     return 0.4 * large_cell + 0.4 * medium_cell + 0.2 * small_cell
 
 
@@ -423,6 +429,8 @@ def yolo_accuracy_v3(pred, target, C=20):
     medium_cell = yolo_accuracy(pred[1], target[1], C)
     small_cell = yolo_accuracy(pred[2], target[2], C)
     
+    # print(large_cell, medium_cell, small_cell)
+    # return small_cell
     return (large_cell + medium_cell + small_cell)/3
    
 
@@ -453,7 +461,7 @@ if __name__ == '__main__':
     # 960, 720 -> 30, 23 & 60, 45 & 120, 90
 
 
-    is_use_autoscale = True
+    is_use_autoscale = False
 
     train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None, version="yolov3")
 
@@ -464,7 +472,7 @@ if __name__ == '__main__':
             train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=12, pin_memory=True, persistent_workers=True)
     else:
         if platform.system() == 'Windows':
-            train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=4)
+            train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
         if platform.system() == 'Linux':
             train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=12)
 

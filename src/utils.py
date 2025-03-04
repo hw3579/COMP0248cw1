@@ -252,3 +252,147 @@ def draw_the_yolo_label(image, yolo_label):
             image = cv2.rectangle(image, (position[0], position[1]), (position[2], position[3]), (255, 25*i, 255), 2)
         
     return image
+
+
+
+def compute_iou_yolov3(pred, target, w, h, num_classes=20, B=2):
+    '''
+    计算YOLOv3预测结果与目标标签之间的IoU值
+    
+    参数：
+        pred: 模型预测结果，形状为 (Sy, Sx, num_classes + B*5)
+        target: 目标标签，形状为 (Sy, Sx, num_classes + B*5)
+        w, h: 原始图像的宽度和高度
+        num_classes: 类别数量
+        B: 每个网格预测的边界框数量
+    
+    返回：
+        class_iou: 各类别IoU的字典
+        mean_iou: 所有类别的平均IoU值
+    '''
+    # 提取类别预测和目标
+    pred_class = pred[..., :num_classes]
+    target_class = target[..., :num_classes]
+    
+    # 提取边界框信息
+    pred_boxes = pred[..., num_classes:].reshape(-1, B, 5)  # (Sy*Sx, B, 5)
+    target_boxes = target[..., num_classes:].reshape(-1, B, 5)  # (Sy*Sx, B, 5)
+    
+    Sy, Sx = pred_class.shape[:2]  # 获取网格尺寸
+    
+    # 存储每个类别的IoU值
+    class_iou = {}
+    total_iou = 0
+    valid_classes = 0
+    
+    # 遍历所有类别
+    for c in range(num_classes):
+        # 找到包含该类别的网格
+        pred_class_mask = (pred_class[..., c] > 0.5).flatten()  # (Sy*Sx)
+        target_class_mask = (target_class[..., c] > 0.5).flatten()  # (Sy*Sx)
+        
+        if not target_class_mask.any():  # 如果目标中没有该类别，跳过
+            continue
+        
+        # 获取该类别的预测和目标边界框
+        class_pred_boxes = pred_boxes[pred_class_mask]  # (N, B, 5)，N为预测该类的网格数
+        class_target_boxes = target_boxes[target_class_mask]  # (M, B, 5)，M为目标中该类的网格数
+        
+        if len(class_pred_boxes) == 0 or len(class_target_boxes) == 0:
+            class_iou[c] = 0
+            continue
+        
+        # 只考虑置信度最高的边界框
+        class_pred_boxes = class_pred_boxes[:, torch.argmax(class_pred_boxes[..., 4], dim=1)]  # (N, 5)
+        class_target_boxes = class_target_boxes[:, torch.argmax(class_target_boxes[..., 4], dim=1)]  # (M, 5)
+        
+        # 预测框转换为绝对坐标 (x1, y1, x2, y2)
+        pred_absolute_boxes = []
+        for i, box in enumerate(class_pred_boxes):
+            # 获取对应网格索引
+            grid_idx = torch.where(pred_class_mask)[0][i]
+            gy, gx = grid_idx // Sx, grid_idx % Sx  # 将一维索引转为二维网格坐标
+            
+            # 转换为图像中的中心坐标
+            cx = (gx + box[0]) * w / Sx  # 转换为图像绝对坐标
+            cy = (gy + box[1]) * h / Sy
+            box_w = box[2] * w  # 宽高是相对整个图像的比例
+            box_h = box[3] * h
+            
+            # 转换为左上右下角坐标 - 使用torch函数替代max/min
+            x1 = torch.clamp(cx - box_w / 2, min=0)
+            y1 = torch.clamp(cy - box_h / 2, min=0)
+            x2 = torch.clamp(cx + box_w / 2, max=w)
+            y2 = torch.clamp(cy + box_h / 2, max=h)
+            
+            # 使用stack创建新张量，保留原始设备
+            pred_absolute_boxes.append(torch.stack([x1, y1, x2, y2]))
+
+        # 目标框转换为绝对坐标 - 同样应用修改
+        target_absolute_boxes = []
+        for i, box in enumerate(class_target_boxes):
+            # 获取对应网格索引
+            grid_idx = torch.where(target_class_mask)[0][i]
+            gy, gx = grid_idx // Sx, grid_idx % Sx
+            
+            # 转换为图像中的中心坐标
+            cx = (gx + box[0]) * w / Sx
+            cy = (gy + box[1]) * h / Sy
+            box_w = box[2] * w
+            box_h = box[3] * h
+            
+            # 转换为左上右下角坐标 - 使用torch函数替代max/min
+            x1 = torch.clamp(cx - box_w / 2, min=0)
+            y1 = torch.clamp(cy - box_h / 2, min=0)
+            x2 = torch.clamp(cx + box_w / 2, max=w)
+            y2 = torch.clamp(cy + box_h / 2, max=h)
+            
+            # 使用stack创建新张量，保留原始设备
+            target_absolute_boxes.append(torch.stack([x1, y1, x2, y2]))
+        
+        # 如果转换后没有有效框，跳过
+        if not pred_absolute_boxes or not target_absolute_boxes:
+            class_iou[c] = 0
+            continue
+        
+        # 计算每个预测框与所有目标框的IoU
+        pred_boxes_tensor = torch.stack(pred_absolute_boxes)
+        target_boxes_tensor = torch.stack(target_absolute_boxes)
+        
+        # 计算IoU矩阵
+        ious = []
+        for pred_box in pred_boxes_tensor:
+            box_ious = []
+            for target_box in target_boxes_tensor:
+                # 计算交集区域 - 使用torch函数替代max/min
+                x1 = torch.maximum(pred_box[0], target_box[0])
+                y1 = torch.maximum(pred_box[1], target_box[1])
+                x2 = torch.minimum(pred_box[2], target_box[2])
+                y2 = torch.minimum(pred_box[3], target_box[3])
+                
+                # 计算交集面积
+                w_inter = torch.clamp(x2 - x1, min=0)
+                h_inter = torch.clamp(y2 - y1, min=0)
+                intersection = w_inter * h_inter
+                
+                # 计算并集面积
+                pred_area = (pred_box[2] - pred_box[0]) * (pred_box[3] - pred_box[1])
+                target_area = (target_box[2] - target_box[0]) * (target_box[3] - target_box[1])
+                union = pred_area + target_area - intersection
+                
+                # 计算IoU
+                iou = intersection / (union + 1e-6)  # 防止除零
+                box_ious.append(iou.item())  # 转换为Python标量
+            
+            if box_ious:  # 确保列表非空
+                ious.append(max(box_ious))  # 取最大IoU
+        
+        # 计算该类别的平均IoU
+        class_iou[c] = sum(ious) / len(ious) if ious else 0
+        total_iou += class_iou[c]
+        valid_classes += 1
+    
+    # 计算所有类别的平均IoU
+    mean_iou = total_iou / valid_classes if valid_classes > 0 else 0
+    
+    return class_iou, mean_iou

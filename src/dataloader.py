@@ -186,7 +186,7 @@ if __name__ == '__main__':
         dataset_yolov3 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov3")
         dataset_yolov3.getitem(0)
         image_yolov3 = dataset_yolov3[0][0].permute(1, 2, 0)
-        label_yolov3 = dataset_yolov3[0][1][0]
+        label_yolov3 = dataset_yolov3[0][1][2]
         pl[1, 1].imshow(draw_the_yolo_label(image_yolov3, label_yolov3))
 
         plt.savefig('fig/data.png')

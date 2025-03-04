@@ -112,7 +112,7 @@ with torch.no_grad():
                                     image = cv2.putText(image, text, text_position, font, 0.5, (255, 25*_b, 255), 2)
 
             if image is not None and is_plot:
-                # print("plotting")
+                print("plotting")
                 plt.imshow(image)
                 plt.show()
                         
