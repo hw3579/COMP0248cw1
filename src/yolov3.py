@@ -128,12 +128,12 @@ class Yolov3(nn.Module):
     def _CBLset(self, in_channels):
         return nn.Sequential(
             CBL(in_channels, in_channels//2, 1, 1, 0),
-            # CBL(in_channels//2, in_channels, 3, 1, 1),
-            # nn.Dropout2d(0.1),  # 添加dropout
-            # CBL(in_channels, in_channels//2, 1, 1, 0),
-            # CBL(in_channels//2, in_channels, 3, 1, 1),
-            # nn.Dropout2d(0.1),  # 添加dropout
-            # CBL(in_channels, in_channels//2, 1, 1, 0)
+            CBL(in_channels//2, in_channels, 3, 1, 1),
+            nn.Dropout2d(0.1),  # 添加dropout
+            CBL(in_channels, in_channels//2, 1, 1, 0),
+            CBL(in_channels//2, in_channels, 3, 1, 1),
+            nn.Dropout2d(0.1),  # 添加dropout
+            CBL(in_channels, in_channels//2, 1, 1, 0)
         )
 
     def forward(self, x):
@@ -344,7 +344,7 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
     # 计算分类损失（仅对目标存在的网格）
     class_loss = F.binary_cross_entropy(obj_mask * pred_class_probs, obj_mask * target_class_probs, reduction='sum')
 
-    # print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), class_loss.item())
+    print(xy_loss.item(), wh_loss.item(), obj_conf_loss.item(), class_loss.item())
     # 最终总损失
     total_loss = (
         lambda_coord * xy_loss +       # 坐标损失
@@ -493,7 +493,7 @@ if __name__ == '__main__':
     model.to(device)
     model.train()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-3)
 #     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 #     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
 #     optimizer, mode='min', factor=0.5, patience=5
@@ -501,7 +501,7 @@ if __name__ == '__main__':
 
     total_loss = []
     total_acc = []
-    num_epochs = 150
+    num_epochs = 75
 
     if is_use_autoscale:
         scaler = GradScaler()
@@ -541,8 +541,8 @@ if __name__ == '__main__':
                     # 为下一次迭代更新scaler
                     scaler.update()
             else:
-                pred = model(images)
-                # pred = labels
+                # pred = model(images)
+                pred = labels
 
                 loss = yolo_loss_funcv3(pred, labels, w/32, h/32, model.B, model.C)
                 loss.backward()
