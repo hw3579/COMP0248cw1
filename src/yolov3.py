@@ -65,12 +65,12 @@ class Yolov3(nn.Module):
         self.out_channels = num_classes + 5*B
         self.B = B
         self.C = num_classes
-        # self.conv1 = CBL(in_channels, 32, 3, 1, 1)
-        self.conv1 = CBL(in_channels, 128, 3, 1, 1)
+        self.conv1 = CBL(in_channels, 32, 3, 1, 1)
+        # self.conv1 = CBL(in_channels, 128, 3, 1, 1)
 
         # 1 2 8 8 4 -> 0 0 2 2 1 -> 0 0 1 1 1
-        # self.resunit1 = ResUnitX(32, 1)
-        # self.resunit2 = ResUnitX(64, 2)
+        self.resunit1 = ResUnitX(32, 1)
+        self.resunit2 = ResUnitX(64, 1)
         self.resunit3 = ResUnitX(128, 2)
         self.resunit4 = ResUnitX(256, 2)
         self.resunit5 = ResUnitX(512, 1)
@@ -128,20 +128,20 @@ class Yolov3(nn.Module):
     def _CBLset(self, in_channels):
         return nn.Sequential(
             CBL(in_channels, in_channels//2, 1, 1, 0),
-            CBL(in_channels//2, in_channels, 3, 1, 1),
-            nn.Dropout2d(0.1),  # 添加dropout
-            CBL(in_channels, in_channels//2, 1, 1, 0),
-            CBL(in_channels//2, in_channels, 3, 1, 1),
-            nn.Dropout2d(0.1),  # 添加dropout
-            CBL(in_channels, in_channels//2, 1, 1, 0)
+            # CBL(in_channels//2, in_channels, 3, 1, 1),
+            # nn.Dropout2d(0.1),  # 添加dropout
+            # CBL(in_channels, in_channels//2, 1, 1, 0),
+            # CBL(in_channels//2, in_channels, 3, 1, 1),
+            # nn.Dropout2d(0.1),  # 添加dropout
+            # CBL(in_channels, in_channels//2, 1, 1, 0)
         )
 
     def forward(self, x):
         x = self.conv1(x)
-        # x = self.resunit1(x)
-        # x = self.resunit2(x)
+        x = self.resunit1(x)
+        x = self.resunit2(x)
 
-        x = F.interpolate(x, scale_factor=0.25, mode='nearest') #大小匹配
+        # x = F.interpolate(x, scale_factor=0.25, mode='nearest') #大小匹配
         pred3 = self.resunit3(x)
         pred2 = self.resunit4(pred3)
         x = self.resunit5(pred2)
@@ -357,7 +357,7 @@ from train import bbox_iou
 #     return total_loss
 
 
-def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=5, lambda_noobj=0.5):
+def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord=50, lambda_noobj=1e-4):
     """
     YOLO 损失函数计算（支持 batch 维度）
     """
@@ -371,7 +371,7 @@ def yolo_loss_funcv3_1(predictions, targets, Sx=7, Sy=7, B=2, C=20, lambda_coord
 
     # 计算坐标损失
     coord_loss = lambda_coord * (
-        F.mse_loss(predictions[..., C:C+2], targets[..., C:C+2], reduction='sum') +
+        F.binary_cross_entropy(predictions[..., C:C+2], targets[..., C:C+2], reduction='sum') +
         F.mse_loss(torch.sqrt(torch.abs(predictions[..., C+2:C+4] + 1e-6)), torch.sqrt(torch.abs(targets[..., C+2:C+4] + 1e-6)), reduction='sum')
     )
 
@@ -432,7 +432,7 @@ def yolo_accuracy(predictions, targets, C=20):
     position_target = targets[..., C:C+2]    # 真实xy坐标
     # 添加小值防止除零
     epsilon = 1e-6
-    
+
     # 更稳健的xy精度计算
     xy_diff = torch.abs(position_pred[obj_mask] - position_target[obj_mask])
     # 使用绝对误差而非相对误差
@@ -515,7 +515,13 @@ if __name__ == '__main__':
     tst_label[0] = data[1][0].unsqueeze(0)
     tst_label[1] = data[1][1].unsqueeze(0)
     tst_label[2] = data[1][2].unsqueeze(0)
-    model = Yolov3(5, in_channels=3, B=1)
+
+
+    use_pre_train = True
+    if use_pre_train:
+        model = torch.load('results/full_model_yolov3_optimize3.pth', weights_only=False)
+    else:
+        model = Yolov3(5, in_channels=3, B=1)
 
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -596,6 +602,8 @@ if __name__ == '__main__':
         total_loss.append(loss_per_epoch)
         total_acc.append(acc_per_epoch)
 
+        if (epoch + 1) % 5 == 0:
+            torch.save(model, f'results/full_model_yolov3_optimize3.pth')
         # Early stopping
         # if best_loss - loss_per_epoch > min_delta:
         #     best_loss = loss_per_epoch
