@@ -17,13 +17,7 @@ import pandas as pd
 from utils import segmentation_to_yolo
 from utils import segmentation_to_yolov3
 from utils import draw_the_yolo_label
-# print('Using PyTorch version:', torch.__version__)
-# if torch.cuda.is_available():
-#     print('Using GPU, device name:', torch.cuda.get_device_name(0))
-#     device = torch.device('cuda')
-# else:
-#     print('No GPU found, using CPU instead.')
-#     device = torch.device('cpu')
+
 
 def filter_classes(classes : pd.DataFrame):
     selected_classes = {
