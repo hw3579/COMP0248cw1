@@ -588,10 +588,13 @@ if __name__ == "__main__":
             with open('results/deeplabmodeldatafinal.json', 'w') as f:
                 json.dump(data, f)
 
+        # 替换原有的早停逻辑代码块
+
         # early stopping
         patience = 10  # 连续多少个epoch没改善就停止
-        min_delta = 0.0005  # 改善的最小阈值
-        
+        min_delta = 1e-4  # 改善的最小阈值
+        min_epochs_before_earlystop = 75  # 至少训练这么多epoch才开始检查早停
+
         # 初始化早停所需变量
         if epoch == 0:
             best_loss = loss_per_epoch
@@ -605,11 +608,15 @@ if __name__ == "__main__":
             # 保存最佳模型
             torch.save(model, 'results/deeplabmodelfullfinal.pth')
         else:
-            counter += 1
-            print(f"Early stopping counter: {counter}/{patience}")
+            # 只有在达到最小训练轮数后才增加早停计数器
+            if epoch >= min_epochs_before_earlystop:
+                counter += 1
+                print(f"Early stopping counter: {counter}/{patience} (active after {min_epochs_before_earlystop} epochs)")
+            else:
+                print(f"Early stopping not active yet, will activate after {min_epochs_before_earlystop} epochs")
             
-        # 如果连续patience个epoch没有改善，停止训练
-        if counter >= patience:
+        # 如果连续patience个epoch没有改善且已经过了最小训练轮数，停止训练
+        if counter >= patience and epoch >= min_epochs_before_earlystop:
             print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with loss {best_loss:.4f}")
             break
 
