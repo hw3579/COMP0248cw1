@@ -15,7 +15,7 @@ import os
 import pandas as pd
 
 from utils import segmentation_to_yolo
-from utils import segmentation_to_yolov3
+from utils import segmentation_to_yolov3, segmentation_to_yolov3_1
 from utils import draw_the_yolo_label
 
 
@@ -110,14 +110,16 @@ class Comp0249Dataset(Dataset):
             label = self.target_transform(label)
         
         if self.version == "binary":
-            yolo_label = label_gray  
-           
-        elif self.version == "yolov1":
-            yolo_label = segmentation_to_yolo(label_gray, S=7, num_classes=5, B=2, scale=self.scale)
-        elif self.version == "yolov3":
-            yolo_label = segmentation_to_yolov3(label_gray, w, h, num_classes=5, B=1, scale=self.scale)
+            binary_label = label_gray  
+            yolo_label = segmentation_to_yolov3_1(label_gray, Sx = 8, Sy = 6 , num_classes=5, B=1, scale=1)
 
-        return image, yolo_label
+           
+        # elif self.version == "yolov1":
+        #     yolo_label = segmentation_to_yolo(label_gray, S=7, num_classes=5, B=2, scale=self.scale)
+        # elif self.version == "yolov3":
+        #     yolo_label = segmentation_to_yolov3(label_gray, w, h, num_classes=5, B=1, scale=self.scale)
+
+        return image, [binary_label, yolo_label]
 
     def getitem(self, idx):
         return self.__getitem__(idx)
@@ -169,19 +171,20 @@ if __name__ == '__main__':
         # print(dataset[0])
         fig, pl = plt.subplots(2, 2)
         pl[0, 0].imshow(dataset[0][0].permute(1, 2, 0))
-        pl[0, 1].imshow(dataset[0][1], cmap='gray')
+        pl[0, 1].imshow(dataset[0][1][0], cmap='gray')
+        print(dataset[0][1][1].shape)
 
-        dataset_yolov1 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
-        dataset_yolov1.getitem(0)
-        image_yolov1 = dataset_yolov1[0][0].permute(1, 2, 0)
-        label_yolov1 = dataset_yolov1[0][1]
-        pl[1, 0].imshow(draw_the_yolo_label(image_yolov1, label_yolov1))
+        # dataset_yolov1 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
+        # dataset_yolov1.getitem(0)
+        # image_yolov1 = dataset_yolov1[0][0].permute(1, 2, 0)
+        # label_yolov1 = dataset_yolov1[0][1]
+        # pl[1, 0].imshow(draw_the_yolo_label(image_yolov1, label_yolov1))
 
-        dataset_yolov3 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov3")
-        dataset_yolov3.getitem(0)
-        image_yolov3 = dataset_yolov3[0][0].permute(1, 2, 0)
-        label_yolov3 = dataset_yolov3[0][1][2]
-        pl[1, 1].imshow(draw_the_yolo_label(image_yolov3, label_yolov3))
+        # dataset_yolov3 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov3")
+        # dataset_yolov3.getitem(0)
+        # image_yolov3 = dataset_yolov3[0][0].permute(1, 2, 0)
+        # label_yolov3 = dataset_yolov3[0][1][2]
+        # pl[1, 1].imshow(draw_the_yolo_label(image_yolov3, label_yolov3))
 
         plt.savefig('fig/data.png')
         plt.show()

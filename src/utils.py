@@ -112,8 +112,12 @@ def segmentation_to_yolov3_1(label, Sx, Sy, num_classes=20, B=2, scale=1): # 重
                     格式为：前 num_classes 维：目标类别；
                             后面 B*5 维，每个边框组成 [cx, cy, w, h, confidence]
     """
+    Sx = math.ceil(Sx)
+    Sy = math.ceil(Sy)
     # 将 label 转为 numpy 数组
     label_np = label.cpu().numpy().astype(np.uint8)
+    if len(label_np.shape) == 3:
+        label_np = label_np[0]
     H, W = label_np.shape
     yolo_label = np.zeros((Sy, Sx, B * 5 + num_classes), dtype=np.float32)
 
@@ -396,3 +400,121 @@ def compute_iou_yolov3(pred, target, w, h, num_classes=20, B=2):
     mean_iou = total_iou / valid_classes if valid_classes > 0 else 0
     
     return class_iou, mean_iou
+
+
+from torch.nn import functional as F
+def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noobj=0.5):
+    """
+    YOLO 损失函数计算（支持 batch 维度）
+    """
+    batch = predictions.shape[0]  # 获取 batch 大小
+
+    # predictions[..., :C] = torch.sigmoid(predictions[..., :C])
+    # predictions[..., C+4:C+4+B*5:5] = torch.sigmoid(predictions[..., C+4:4+C+B*5:5])
+
+    # 类别损失
+    class_loss = F.mse_loss(predictions[..., :C], targets[..., :C], reduction='sum')
+
+    # 计算坐标损失
+    coord_loss = lambda_coord * (
+        F.mse_loss(predictions[..., C:C+2], targets[..., C:C+2], reduction='sum') +
+        F.mse_loss(torch.sqrt(torch.abs(predictions[..., C+2:C+4] + 1e-6)), torch.sqrt(torch.abs(targets[..., C+2:C+4] + 1e-6)), reduction='sum')
+    )
+
+    # 置信度损失
+    obj_loss = F.mse_loss(predictions[..., C+4], targets[..., C+4], reduction='sum')
+    noobj_loss = lambda_noobj * F.mse_loss(predictions[..., C+4] * (1 - targets[..., C+4]), targets[..., C+4] * (1 - targets[..., C+4]), reduction='sum')
+
+    # 总损失
+    total_loss = class_loss + coord_loss + obj_loss + noobj_loss
+    return total_loss
+
+
+def compute_iou_yolo(output_yolo, labels_yolo):
+    '''
+    output_yolo: torch.Tensor, 尺寸 (batch_size, Sx, Sy, num_classes + B*5)
+    labels_yolo: torch.Tensor, 尺寸 (batch_size, Sx, Sy, num_classes + B*5)
+    
+    '''
+    
+    
+
+
+def compute_iou_yolo(output_yolo, labels_yolo):
+    '''
+    计算YOLO检测头输出与真实标签的IoU
+
+    参数：
+        output_yolo: torch.Tensor, 尺寸 (batch_size, Sx, Sy, num_classes + B*5)
+        labels_yolo: torch.Tensor, 尺寸 (batch_size, Sx, Sy, num_classes + B*5)
+    
+    返回：
+        mean_iou: float, 平均IoU值
+        accuracy: float, 类别预测准确率
+    '''
+    batch_size = output_yolo.shape[0]
+    num_classes = 5  # 假设5个类别，从代码其他部分推断
+    
+    # 提取类别预测和目标
+    pred_class = output_yolo[..., :num_classes]
+    target_class = labels_yolo[..., :num_classes]
+    
+    # 提取边界框预测(cx, cy, w, h, conf)
+    pred_boxes = output_yolo[..., num_classes:num_classes+5]
+    target_boxes = labels_yolo[..., num_classes:num_classes+5]
+    
+    # 计算类别准确率 - 只考虑有目标的网格
+    target_obj_mask = (target_boxes[..., 4] > 0.5)  # 目标存在的掩码
+    if target_obj_mask.sum() > 0:
+        # 对于每个预测类别，找到概率最高的类别
+        pred_class_idx = torch.argmax(pred_class, dim=-1)
+        target_class_idx = torch.argmax(target_class, dim=-1)
+        
+        # 只计算有目标的网格的准确率
+        correct = (pred_class_idx[target_obj_mask] == target_class_idx[target_obj_mask]).float()
+        accuracy = correct.sum() / (target_obj_mask.sum() + 1e-6)
+    else:
+        accuracy = torch.tensor(0.0, device=output_yolo.device)
+    
+    # 计算IoU - 只考虑有目标的网格
+    ious = torch.zeros_like(target_boxes[..., 0])  # 初始化IoU矩阵
+    
+    # 将边界框格式从[cx, cy, w, h]转换为[x1, y1, x2, y2]以计算IoU
+    pred_x1 = pred_boxes[..., 0] - pred_boxes[..., 2] / 2
+    pred_y1 = pred_boxes[..., 1] - pred_boxes[..., 3] / 2
+    pred_x2 = pred_boxes[..., 0] + pred_boxes[..., 2] / 2
+    pred_y2 = pred_boxes[..., 1] + pred_boxes[..., 3] / 2
+    
+    target_x1 = target_boxes[..., 0] - target_boxes[..., 2] / 2
+    target_y1 = target_boxes[..., 1] - target_boxes[..., 3] / 2
+    target_x2 = target_boxes[..., 0] + target_boxes[..., 2] / 2
+    target_y2 = target_boxes[..., 1] + target_boxes[..., 3] / 2
+    
+    # 计算交集区域
+    inter_x1 = torch.max(pred_x1, target_x1)
+    inter_y1 = torch.max(pred_y1, target_y1)
+    inter_x2 = torch.min(pred_x2, target_x2)
+    inter_y2 = torch.min(pred_y2, target_y2)
+    
+    # 计算交集面积，确保宽高为正
+    inter_w = torch.clamp(inter_x2 - inter_x1, min=0)
+    inter_h = torch.clamp(inter_y2 - inter_y1, min=0)
+    intersection = inter_w * inter_h
+    
+    # 计算各自面积
+    pred_area = (pred_x2 - pred_x1) * (pred_y2 - pred_y1)
+    target_area = (target_x2 - target_x1) * (target_y2 - target_y1)
+    
+    # 计算并集
+    union = pred_area + target_area - intersection + 1e-6
+    
+    # 计算IoU
+    ious = intersection / union
+    
+    # 只考虑有目标的网格的IoU
+    if target_obj_mask.sum() > 0:
+        mean_iou = ious[target_obj_mask].mean()
+    else:
+        mean_iou = torch.tensor(0.0, device=output_yolo.device)
+    
+    return mean_iou.item(), accuracy.item()

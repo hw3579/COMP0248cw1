@@ -271,68 +271,49 @@ class DeepLabV3PlusDecoder(nn.Module):
         x = F.interpolate(x, size=(self.h, self.w), mode='bilinear', align_corners=True)
         return x  # 输出分割结果 (480x480xnum_classes)
 
+import math
 class YOLOHead(nn.Module):
-    def __init__(self, in_channels, num_classes, anchors=None):
+    def __init__(self, in_channels, num_classes, Sx, Sy):
         super(YOLOHead, self).__init__()
-        self.num_classes = num_classes
-        self.anchors = anchors if anchors else [[10, 13], [16, 30], [33, 23]]
-        self.num_anchors = len(self.anchors)
+        self.C = num_classes - 1 # 不包括背景 
+        self.B = 1
+        self.Sx = math.ceil(Sx)
+        self.Sy = math.ceil(Sy)
+        self.adaptive = nn.AdaptiveAvgPool2d((6, 8))  # 强制将输出调整为 (batch, 1024, 3, 3)
         
-        # 每个框预测5+num_classes个值：x,y,w,h,conf和类别概率
-        self.out_channels = self.num_anchors * (5 + num_classes)
-        
-        self.conv1 = nn.Conv2d(in_channels, 512, kernel_size=1)
-        self.bn1 = nn.BatchNorm2d(512)
-        self.relu1 = nn.LeakyReLU(0.1, inplace=True)
-        
-        self.conv2 = nn.Conv2d(512, 1024, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(1024)
-        self.relu2 = nn.LeakyReLU(0.1, inplace=True)
-        
-        self.conv3 = nn.Conv2d(1024, 512, kernel_size=1)
-        self.bn3 = nn.BatchNorm2d(512)
-        self.relu3 = nn.LeakyReLU(0.1, inplace=True)
-        
-        # 最终的预测层
-        self.pred = nn.Conv2d(512, self.out_channels, kernel_size=1)
-        
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu1(x)
-        
-        x = self.conv2(x)
-        x = self.bn2(x)
-        x = self.relu2(x)
-        
-        x = self.conv3(x)
-        x = self.bn3(x)
-        x = self.relu3(x)
-        
-        x = self.pred(x)
-        
-        # 重塑输出为[batch, num_anchors, grid_h, grid_w, 5+num_classes]
-        batch_size = x.size(0)
-        grid_size = x.size(2)
-        
-        # 将通道维度重组为检测器所需格式
-        prediction = x.view(batch_size, self.num_anchors, 5 + self.num_classes, 
-                           grid_size, grid_size).permute(0, 1, 3, 4, 2).contiguous()
-        
-        return prediction
+        # 使用卷积层代替全连接层
+        self.fc_layers = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(6 * 8 * 2048, 4096),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(0.5),
+            nn.Linear(4096, 8 * 6 * (self.C + self.B * 5))  # 输出 final_size x final_size x (类别数+边界框数*5)
+        )
     
+    def forward(self, x):
+        # x形状: [batch_size, in_channels, H/32, W/32]
+        x = self.adaptive(x)
+        x = self.fc_layers(x)
+
+        return x.view(-1, 6, 8, self.C + self.B * 5)  # 输出形状: [batch_size, 8, 6, C + B*5]
+
 class TotalDeepLabV3Plus(nn.Module):
-    def __init__(self, num_classes, w=480, h=480):
+    def __init__(self, num_classes, w=960, h=720):
         super(TotalDeepLabV3Plus, self).__init__()
         self.backbone = ResNetHead()
         self.aspp = ASPP()
         self.decoder = DeepLabV3PlusDecoder(num_classes, w, h)
+        self.yolo_head = YOLOHead(2048, num_classes, w/32, h/32)
 
     def forward(self, x):
         x = self.backbone(x)
-        x = self.aspp(x)
-        x = self.decoder(x)
-        return x
+        # batch, 2048, 30, 23
+
+        x_seg = self.aspp(x)    
+        x_seg = self.decoder(x_seg)
+        x_yolo = self.yolo_head(x)
+
+        return x_seg, x_yolo
 
 def aspp_test():
     model = ASPP()
@@ -408,6 +389,8 @@ def test_compute_iou():
 
 import platform
 from torch.amp import autocast, GradScaler
+from utils import segmentation_to_yolov3_1, yolo_loss
+
 
 if __name__ == "__main__":
     # backbone_test()
@@ -425,7 +408,7 @@ if __name__ == "__main__":
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
         if platform.system() == 'Linux':
-            train_loader = DataLoader(train_dataset, batch_size=24, shuffle=True, num_workers=20, pin_memory=True, persistent_workers=True)
+            train_loader = DataLoader(train_dataset, batch_size=20, shuffle=True, num_workers=20, pin_memory=True, persistent_workers=True)
     else:
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
@@ -434,74 +417,128 @@ if __name__ == "__main__":
 
 
     model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
+    # model = torch.load('results/deeplabmodelfull3.5.pth', weights_only=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)  # 稍微提高初始学习率
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
     total_loss = []
     total_acc = []
-    num_epochs = 150
+    num_epochs = 100
 
     criterion = nn.CrossEntropyLoss()  # 默认会忽略不合法类别
 
-
+    lambda_yolo = 0
 
     if is_use_autoscale:
         scaler = GradScaler()
 
     for epoch in tqdm(range(num_epochs), desc="Epochs"):
         loss_per_epoch = 0.0
+        seg_loss_per_epoch = 0.0
+        yolo_loss_per_epoch = 0.0
         acc_per_epoch = 0.0
 
         for images, labels in tqdm(train_loader, desc="Batches"):
             images = images.to(device, dtype=torch.float32)
-            labels = labels.to(device, dtype=torch.long)
+            labels_segment = labels[0].to(device, dtype=torch.long)
+            labels_yolo = labels[1].to(device, dtype=torch.float32)
 
             optimizer.zero_grad()
             if is_use_autoscale:
                 with autocast(device_type=str(device)):
-                    pred = model(images)
-                    loss = criterion(pred, labels)
-                scaler.scale(loss).backward()
+                    pred, pred_yolo = model(images)
+                    seg_loss = criterion(pred, labels_segment)
+                    yolo_loss_val = yolo_loss(pred_yolo, labels_yolo, 8, 6, 1, 5)
+
+
+                    lambda_yolo = seg_loss_per_epoch / (yolo_loss_per_epoch + 1e-8)
+
+                    batch_total_loss = seg_loss + yolo_loss_val * lambda_yolo
+                
+                # 使用正确的损失进行缩放和反向传播
+                scaler.scale(batch_total_loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                pred = model(images)
-                loss = criterion(pred, labels)
-                loss.backward()
+                pred, pred_yolo = model(images)
+                seg_loss = criterion(pred, labels_segment)
+                yolo_loss_val = yolo_loss(pred_yolo, labels_yolo, 8, 6, 1, 5)
+
+                lambda_yolo = seg_loss_per_epoch / (yolo_loss_per_epoch + 1e-8)
+
+                batch_total_loss = seg_loss + yolo_loss_val * lambda_yolo
+                batch_total_loss.backward()
                 optimizer.step()
-            # # 计算预测结果
-            # pred = model(images)
 
-            # loss = criterion(pred, labels.long())
-            # loss.backward()
-            # optimizer.step()
+            # 累积各类损失
+            loss_per_epoch += batch_total_loss.item()
+            seg_loss_per_epoch += seg_loss.item()
+            yolo_loss_per_epoch += yolo_loss_val.item()
 
-            loss_per_epoch += loss.item()
-
-            # 使用刚刚定义的 yolo_accuracy 计算存在目标格子的分类准确率
-            _, batch_acc = compute_iou(pred, labels)
+            # 计算准确率
+            _, batch_acc = compute_iou(pred, labels_segment)
             acc_per_epoch += batch_acc
 
+        # 计算每个epoch的平均损失和准确率
+        seg_loss_per_epoch /= len(train_loader)
+        yolo_loss_per_epoch /= len(train_loader)
         loss_per_epoch /= len(train_loader)
         acc_per_epoch /= len(train_loader)
+        
+        print(f"segloss:{seg_loss_per_epoch:.4f}, yololoss:{yolo_loss_per_epoch:.4f}")
         print(f"Epoch: {epoch}, Loss: {loss_per_epoch:.4f}, Acc: {acc_per_epoch:.4f}")
 
         total_loss.append(loss_per_epoch)
         total_acc.append(acc_per_epoch)
+        
+        # 学习率调整
+        scheduler.step(loss_per_epoch)
 
 
         if (epoch + 1) % 5 == 0:
-            torch.save(model, 'results/deeplabmodelfull3.5.pth')
+            torch.save(model, 'results/deeplabmodelfullfinal.pth')
+            import json
+            data = {
+                'loss': total_loss,
+                'accuracy': total_acc
+            }
+            with open('results/deeplabmodeldatafinal.json', 'w') as f:
+                json.dump(data, f)
+
+        # early stopping
+        # patience = 10  # 连续多少个epoch没改善就停止
+        # min_delta = 0.0005  # 改善的最小阈值
+        
+        # # 初始化早停所需变量
+        # if epoch == 0:
+        #     best_loss = loss_per_epoch
+        #     best_epoch = 0
+        #     counter = 0
+        # # 判断是否有改善
+        # elif loss_per_epoch < best_loss - min_delta:
+        #     best_loss = loss_per_epoch
+        #     best_epoch = epoch
+        #     counter = 0
+        #     # 保存最佳模型
+        #     torch.save(model, 'results/deeplabmodel_best.pth')
+        # else:
+        #     counter += 1
+        #     print(f"Early stopping counter: {counter}/{patience}")
+            
+        # # 如果连续patience个epoch没有改善，停止训练
+        # if counter >= patience:
+        #     print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with loss {best_loss:.4f}")
+        #     break
 
     # 保存模型及训练指标
-    torch.save(model, 'results/deeplabmodelfull3.5.pth')
-    import json
-    data = {
-        'loss': total_loss,
-        'accuracy': total_acc
-    }
-    with open('results/deeplabmodeldata3.5.json', 'w') as f:
-        json.dump(data, f)
+    # torch.save(model, 'results/deeplabmodelfull3.5.pth')
+    # import json
+    # data = {
+    #     'loss': total_loss,
+    #     'accuracy': total_acc
+    # }
+    # with open('results/deeplabmodeldata3.5.json', 'w') as f:
+    #     json.dump(data, f)

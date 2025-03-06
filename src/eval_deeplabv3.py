@@ -9,14 +9,18 @@ from utils import cx_cy_to_corners
 import numpy as np
 from utils import draw_the_box
 from train_deeplabv3 import compute_iou
-from train_deeplabv3 import TotalDeepLabV3Plus, Backbone, ASPP, Bottleneck, DeepLabV3PlusDecoder
+from train_deeplabv3 import ConvBlock, ResNetHead, ASPP, DeepLabV3PlusDecoder, TotalDeepLabV3Plus, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead
 import torch.nn as nn
 
-model = torch.load('results/deeplabmodelfull.pth', weights_only=False)
+from utils import compute_iou_yolo
+
+model = torch.load('results/deeplabmodelfullfinal.pth', weights_only=False)
+
 
 model.eval()  # 切换到评估模式
 total_loss = []
 total_acc = []
+total_yolo_iou = []
 
 # 在测试集上进行评估
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -30,6 +34,7 @@ is_plot = True
 
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 criterion = nn.CrossEntropyLoss()
@@ -37,31 +42,42 @@ criterion = nn.CrossEntropyLoss()
 with torch.no_grad():
     for images, labels in tqdm(test_loader):
         images = images.to(device, dtype=torch.float32)
-        labels = labels.to(device, dtype=torch.long)
+        labels_seg_with_batch = labels[0].to(device, dtype=torch.long)
+        labels_yolo_with_batch = labels[1].to(device, dtype=torch.float)
         # output = labels
-        output = model(images)
+        output, output_yolo = model(images)
 
-        loss = criterion(output, labels)
+        loss = criterion(output, labels_seg_with_batch)
         total_loss.append(loss.item())
-        _, batch_acc = compute_iou(output, labels, 6)
+        _, batch_acc = compute_iou(output, labels_seg_with_batch, 6)
         total_acc.append(batch_acc)
         print('loss', loss.item(), 'acc', batch_acc)
 
+        yolo_iou, class_acc = compute_iou_yolo(output_yolo, labels_yolo_with_batch)
+        print('yolo_iou', yolo_iou)
+        total_yolo_iou.append(yolo_iou)
+
+
         if is_plot:
-            import matplotlib.pyplot as plt
-            plt.figure(figsize=(10, 5))
-            plt.subplot(1, 4, 1)
-            show_image = images[0].cpu().numpy().transpose(1, 2, 0).astype(np.uint8)
-            labels = labels.cpu().numpy()
-            pred_labels = torch.argmax(output, dim=1).cpu().numpy()
-            plt.imshow(draw_the_box(show_image, labels[0]))
-            plt.title('Input Image')
-            plt.subplot(1, 4, 2)
-            plt.imshow(labels[0], cmap='gray')
-            plt.title('Ground Truth')
-            plt.subplot(1, 4, 3)
-            plt.imshow(pred_labels[0], cmap='gray')
-            plt.title('Prediction')
-            plt.subplot(1, 4, 4)
-            plt.imshow(draw_the_box(show_image, pred_labels[0]))
-            plt.show()
+            for _batch in range(len(images)):
+
+                show_image = images[_batch].cpu().numpy().transpose(1, 2, 0).astype(np.uint8)
+                labels_seg = labels_seg_with_batch[_batch].cpu().numpy()
+                labels_yolo = labels_yolo_with_batch[_batch].cpu().numpy()
+
+                pred_labels = torch.argmax(output[_batch], dim=0).cpu().numpy()
+
+                plt.figure(figsize=(10, 10))
+                plt.subplot(2, 2, 1)
+                plt.imshow(show_image)
+                plt.title('Input Image')
+                plt.subplot(2, 2, 2)
+                plt.imshow(labels_seg, cmap='gray')
+                plt.title('Ground Truth')
+                plt.subplot(2, 2, 3)
+                plt.imshow(pred_labels, cmap='gray')
+                plt.title('Prediction')
+                plt.subplot(2, 2, 4)
+                plt.imshow(draw_the_box(show_image, pred_labels))
+                plt.title('Prediction with Box')
+                plt.show()
