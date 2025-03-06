@@ -430,67 +430,81 @@ from torch.nn import functional as F
 #     return total_loss/4
 
 def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noobj=0.5, gamma=2.0, alpha=0.25):
-    """
-    YOLO 损失函数计算（支持 batch 维度），带Focal Loss
+    """修正后的YOLO损失函数计算"""
+    batch = predictions.shape[0]  # 获取batch大小
     
-    参数:
-        predictions: 模型预测值
-        targets: 目标值
-        Sx, Sy: 网格尺寸
-        B: 每个网格的边界框数
-        C: 类别数
-        lambda_coord: 坐标损失权重
-        lambda_noobj: 无目标损失权重
-        gamma: Focal Loss的聚焦参数
-        alpha: Focal Loss的平衡参数
-    """
-    batch = predictions.shape[0]  # 获取 batch 大小
-    
-    # 使用Focal Loss计算类别损失
-    # 获取预测概率和目标
+    # 获取预测和目标
     pred_class = predictions[..., :C]
     target_class = targets[..., :C]
     
-    # 计算Focal Loss所需的概率
-    pred_sigmoid = torch.sigmoid(pred_class)
-    
-    # 计算二元交叉熵损失（无reduction）
-    bce_loss = F.binary_cross_entropy_with_logits(pred_class, target_class, reduction='none')
-    
-    # 应用Focal Loss
-    pt = torch.exp(-bce_loss)  # pt是预测概率
-    focal_weight = alpha * (1 - pt) ** gamma
-    focal_loss = focal_weight * bce_loss
-    
-    # 类别损失 - 使用Focal Loss
-    class_loss = focal_loss.sum()
-    
-    # 计算坐标损失
-    coord_loss = lambda_coord * (
-        F.mse_loss(predictions[..., C:C+2], targets[..., C:C+2], reduction='sum') +
-        F.mse_loss(torch.sqrt(torch.abs(predictions[..., C+2:C+4] + 1e-6)), 
-                  torch.sqrt(torch.abs(targets[..., C+2:C+4] + 1e-6)), reduction='sum')
-    )
-    
-    # 置信度损失
-    obj_mask = targets[..., C+4] > 0.5
+    # 创建有目标的掩码
+    obj_mask = (targets[..., C+4] > 0.5)
     noobj_mask = ~obj_mask
     
-    obj_loss = F.mse_loss(
+    # 1. 只对有目标的网格计算类别损失(使用Focal Loss)
+    bce_loss = F.binary_cross_entropy_with_logits(pred_class, target_class, reduction='none')
+    pt = torch.exp(-bce_loss)
+    
+    # 区分正负样本的alpha
+    pos_mask = (target_class > 0.5)
+    neg_mask = ~pos_mask
+    alpha_weight = pos_mask * alpha + neg_mask * (1-alpha)
+    
+    # 应用Focal Loss权重
+    focal_weight = alpha_weight * (1 - pt) ** gamma
+    
+    # 只对有目标的网格计算类别损失
+    obj_expanded = obj_mask.unsqueeze(-1).expand_as(pred_class)
+    focal_loss = focal_weight * bce_loss * obj_expanded
+    class_loss = focal_loss.sum()
+    
+    # 2. 只对有目标的网格计算坐标损失
+    # 提取坐标预测
+    pred_xy = predictions[..., C:C+2]
+    pred_wh = predictions[..., C+2:C+4]
+    target_xy = targets[..., C:C+2]
+    target_wh = targets[..., C+2:C+4]
+    
+    # 对有目标的网格应用掩码
+    obj_expanded_xy = obj_mask.unsqueeze(-1).expand_as(pred_xy)
+    obj_expanded_wh = obj_mask.unsqueeze(-1).expand_as(pred_wh)
+    
+    # 计算坐标损失
+    xy_loss = F.mse_loss(
+        pred_xy * obj_expanded_xy, 
+        target_xy * obj_expanded_xy, 
+        reduction='sum'
+    )
+    
+    # 宽高损失使用平方根变换
+    wh_loss = F.mse_loss(
+        torch.sqrt(torch.abs(pred_wh) + 1e-6) * obj_expanded_wh, 
+        torch.sqrt(torch.abs(target_wh) + 1e-6) * obj_expanded_wh, 
+        reduction='sum'
+    )
+    
+    coord_loss = lambda_coord * (xy_loss + wh_loss)
+    
+    # 3. 置信度损失计算不变
+    obj_conf_loss = F.mse_loss(
         predictions[..., C+4][obj_mask], 
         targets[..., C+4][obj_mask], 
         reduction='sum'
     )
     
-    noobj_loss = lambda_noobj * F.mse_loss(
+    noobj_conf_loss = lambda_noobj * F.mse_loss(
         predictions[..., C+4][noobj_mask], 
         targets[..., C+4][noobj_mask], 
         reduction='sum'
     )
     
-    # 总损失
-    total_loss = class_loss + coord_loss + obj_loss + noobj_loss
-    return total_loss/4
+    # 4. 更合理地归一化损失
+    # 计算有目标的网格数量
+    num_obj = obj_mask.sum().float() + 1e-6
+    
+    # 归一化损失
+    total_loss = class_loss + coord_loss + obj_conf_loss + noobj_conf_loss
+    return total_loss / (batch * num_obj)
     
     
 
