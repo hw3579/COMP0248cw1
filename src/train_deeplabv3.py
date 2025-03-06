@@ -485,7 +485,7 @@ if __name__ == "__main__":
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
         if platform.system() == 'Linux':
-            train_loader = DataLoader(train_dataset, batch_size=20, shuffle=True, num_workers=20, pin_memory=True, persistent_workers=True)
+            train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True)
     else:
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
