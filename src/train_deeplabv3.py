@@ -390,10 +390,25 @@ def test_compute_iou():
 import platform
 from torch.amp import autocast, GradScaler
 from utils import segmentation_to_yolov3_1, yolo_loss
+import os
 
 # 计算类别权重
-def calculate_class_weights(dataset):
-    """计算分割任务的类别权重"""
+
+def calculate_class_weights(dataset, use_cache=True):
+    """计算分割任务的类别权重，支持缓存"""
+    # 创建缓存目录
+    cache_dir = 'data/CamVid/cache'
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, 'class_weights.pth')
+    
+    # 检查是否存在缓存
+    if use_cache and os.path.exists(cache_file):
+        print(f"从缓存加载类别权重: {cache_file}")
+        class_weights = torch.load(cache_file)
+        print(f"加载的类别权重: {class_weights}")
+        return class_weights
+    
+    # 没有缓存，重新计算
     print("计算类别权重...")
     class_counts = {i: 0 for i in range(6)}  # 假设有6个类别（0-5）
     
@@ -418,6 +433,11 @@ def calculate_class_weights(dataset):
     # 归一化权重
     class_weights = class_weights / class_weights.sum() * len(class_counts)
     print(f"类别权重: {class_weights}")
+    
+    # 保存缓存
+    if use_cache:
+        torch.save(class_weights, cache_file)
+        print(f"已保存类别权重缓存: {cache_file}")
     
     return class_weights
 
@@ -485,7 +505,7 @@ if __name__ == "__main__":
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
         if platform.system() == 'Linux':
-            train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=16, pin_memory=True, persistent_workers=True)
+            train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True)
     else:
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
