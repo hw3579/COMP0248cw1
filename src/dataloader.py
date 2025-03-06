@@ -18,6 +18,11 @@ from utils import segmentation_to_yolo
 from utils import segmentation_to_yolov3, segmentation_to_yolov3_1
 from utils import draw_the_yolo_label
 
+import random
+import os.path as osp
+import json
+from tqdm import tqdm
+
 
 def filter_classes(classes : pd.DataFrame):
     selected_classes = {
@@ -44,7 +49,7 @@ class Comp0249Dataset(Dataset):
             is_filter_classes - whether to filter the classes to only the ones we are interested in
 
     '''
-    def __init__(self, dir: str, classes: str, scale = 1, transform=None, target_transform=None, is_filter_classes=True, version="binary"):
+    def __init__(self, dir: str, classes: str, scale = 1, transform=None, target_transform=None, is_filter_classes=True, version="binary", use_cache=True):
 
         self.dir = os.path.join(dir, classes)
         self.dir_labels = os.path.join(dir, classes + '_labels')
@@ -65,7 +70,60 @@ class Comp0249Dataset(Dataset):
         self.target_transform = target_transform
         self.version = version
 
-
+        # 新增缓存相关参数
+        self.use_cache = use_cache
+        self.cache_dir = osp.join(dir, 'cache')
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.rare_class_cache_file = osp.join(self.cache_dir, f'{classes}_rare_classes_{scale}.json')
+        self.class_dist_cache_file = osp.join(self.cache_dir, f'{classes}_class_dist_{scale}.json')
+        
+        # 加载或创建少数类缓存
+        self.rare_class_images = self._load_or_create_rare_class_cache()
+    
+    def _load_or_create_rare_class_cache(self):
+        """加载或创建少数类图像缓存"""
+        if self.use_cache and osp.exists(self.rare_class_cache_file):
+            print(f"正在加载少数类缓存: {self.rare_class_cache_file}")
+            with open(self.rare_class_cache_file, 'r') as f:
+                return json.load(f)
+        else:
+            print("正在分析数据集以识别少数类图像...")
+            rare_class_images = {}
+            for idx in tqdm(range(len(self.images)), desc="分析少数类"):
+                image_name = self.images[idx]
+                image_path = osp.join(self.dir, image_name)
+                label_path = osp.join(self.dir_labels, self.images_labels[idx])
+                
+                # 读取并处理标签以确定类别
+                label = read_image(label_path)
+                _, h, w = label.shape
+                resize = transforms.Resize((h // self.scale, w // self.scale))
+                label = resize(label)
+                label_gray = torch.zeros(h // self.scale, w // self.scale, dtype=torch.uint8)
+                
+                # 应用类别映射
+                for item in self.class_dict:
+                    color = torch.tensor(item[1:4], dtype=label.dtype).view(3, 1, 1)
+                    mask = (label == color).all(dim=0)
+                    label_gray[mask] = item[0]
+                
+                # 检查是否包含少数类
+                unique_classes = torch.unique(label_gray).tolist()
+                rare_classes = [cls for cls in unique_classes if cls in [4, 5]]
+                
+                if rare_classes:
+                    rare_class_images[image_name] = {
+                        "rare_classes": rare_classes,
+                        "all_classes": unique_classes
+                    }
+            
+            # 保存缓存
+            if self.use_cache:
+                with open(self.rare_class_cache_file, 'w') as f:
+                    json.dump(rare_class_images, f)
+                print(f"已保存少数类缓存: {self.rare_class_cache_file}")
+            
+            return rare_class_images
 
     def __len__(self):
         return len(self.images_labels)
@@ -91,6 +149,7 @@ class Comp0249Dataset(Dataset):
         _, h, w = image.shape
         label_gray = torch.zeros(h, w, dtype=torch.uint8)
 
+
         for item in self.class_dict:
             # for hx in range(h):
             #     for wx in range(w):
@@ -103,6 +162,37 @@ class Comp0249Dataset(Dataset):
             mask = (label == color).all(dim=0)
             # 对满足条件的像素赋予类别编号
             label_gray[mask] = item[0]    
+
+        # 检查是否包含少数类
+        unique_classes = torch.unique(label_gray)
+        contains_rare_class = any(cls in [4, 5] for cls in unique_classes)  
+        
+        # 使用缓存判断是否为少数类样本
+        image_name = self.images[idx]
+        contains_rare_class = image_name in self.rare_class_images
+        
+        # 对包含少数类的样本进行更强的数据增强
+        if contains_rare_class:
+            # print(f"应用少数类增强: {image_name}, 类别: {self.rare_class_images[image_name]['rare_classes']}")
+            
+            # 数据增强逻辑保持不变
+            seed = torch.randint(0, 2**32, (1,)).item()
+            
+            torch.manual_seed(seed)
+            random.seed(seed)
+            image_transform = transforms.Compose([
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2)
+            ])
+            image = image_transform(image)
+            
+            torch.manual_seed(seed)
+            random.seed(seed)
+            label_transform = transforms.Compose([
+                transforms.RandomHorizontalFlip(p=0.5)
+            ])
+            label_gray = label_transform(label_gray.unsqueeze(0)).squeeze(0)
+
 
         if self.transform:
             image = self.transform(image)
@@ -123,7 +213,7 @@ class Comp0249Dataset(Dataset):
 
     def getitem(self, idx):
         return self.__getitem__(idx)
-
+    
 
 
 

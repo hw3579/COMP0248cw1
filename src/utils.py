@@ -403,39 +403,94 @@ def compute_iou_yolov3(pred, target, w, h, num_classes=20, B=2):
 
 
 from torch.nn import functional as F
-def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noobj=0.5):
+# def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noobj=0.5):
+#     """
+#     YOLO 损失函数计算（支持 batch 维度）
+#     """
+#     batch = predictions.shape[0]  # 获取 batch 大小
+
+#     # predictions[..., :C] = torch.sigmoid(predictions[..., :C])
+#     # predictions[..., C+4:C+4+B*5:5] = torch.sigmoid(predictions[..., C+4:4+C+B*5:5])
+
+#     # 类别损失
+#     class_loss = F.mse_loss(predictions[..., :C], targets[..., :C], reduction='sum')
+
+#     # 计算坐标损失
+#     coord_loss = lambda_coord * (
+#         F.mse_loss(predictions[..., C:C+2], targets[..., C:C+2], reduction='sum') +
+#         F.mse_loss(torch.sqrt(torch.abs(predictions[..., C+2:C+4] + 1e-6)), torch.sqrt(torch.abs(targets[..., C+2:C+4] + 1e-6)), reduction='sum')
+#     )
+
+#     # 置信度损失
+#     obj_loss = F.mse_loss(predictions[..., C+4], targets[..., C+4], reduction='sum')
+#     noobj_loss = lambda_noobj * F.mse_loss(predictions[..., C+4] * (1 - targets[..., C+4]), targets[..., C+4] * (1 - targets[..., C+4]), reduction='sum')
+
+#     # 总损失
+#     total_loss = class_loss + coord_loss + obj_loss + noobj_loss
+#     return total_loss/4
+
+def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noobj=0.5, gamma=2.0, alpha=0.25):
     """
-    YOLO 损失函数计算（支持 batch 维度）
+    YOLO 损失函数计算（支持 batch 维度），带Focal Loss
+    
+    参数:
+        predictions: 模型预测值
+        targets: 目标值
+        Sx, Sy: 网格尺寸
+        B: 每个网格的边界框数
+        C: 类别数
+        lambda_coord: 坐标损失权重
+        lambda_noobj: 无目标损失权重
+        gamma: Focal Loss的聚焦参数
+        alpha: Focal Loss的平衡参数
     """
     batch = predictions.shape[0]  # 获取 batch 大小
-
-    # predictions[..., :C] = torch.sigmoid(predictions[..., :C])
-    # predictions[..., C+4:C+4+B*5:5] = torch.sigmoid(predictions[..., C+4:4+C+B*5:5])
-
-    # 类别损失
-    class_loss = F.mse_loss(predictions[..., :C], targets[..., :C], reduction='sum')
-
+    
+    # 使用Focal Loss计算类别损失
+    # 获取预测概率和目标
+    pred_class = predictions[..., :C]
+    target_class = targets[..., :C]
+    
+    # 计算Focal Loss所需的概率
+    pred_sigmoid = torch.sigmoid(pred_class)
+    
+    # 计算二元交叉熵损失（无reduction）
+    bce_loss = F.binary_cross_entropy_with_logits(pred_class, target_class, reduction='none')
+    
+    # 应用Focal Loss
+    pt = torch.exp(-bce_loss)  # pt是预测概率
+    focal_weight = alpha * (1 - pt) ** gamma
+    focal_loss = focal_weight * bce_loss
+    
+    # 类别损失 - 使用Focal Loss
+    class_loss = focal_loss.sum()
+    
     # 计算坐标损失
     coord_loss = lambda_coord * (
         F.mse_loss(predictions[..., C:C+2], targets[..., C:C+2], reduction='sum') +
-        F.mse_loss(torch.sqrt(torch.abs(predictions[..., C+2:C+4] + 1e-6)), torch.sqrt(torch.abs(targets[..., C+2:C+4] + 1e-6)), reduction='sum')
+        F.mse_loss(torch.sqrt(torch.abs(predictions[..., C+2:C+4] + 1e-6)), 
+                  torch.sqrt(torch.abs(targets[..., C+2:C+4] + 1e-6)), reduction='sum')
     )
-
+    
     # 置信度损失
-    obj_loss = F.mse_loss(predictions[..., C+4], targets[..., C+4], reduction='sum')
-    noobj_loss = lambda_noobj * F.mse_loss(predictions[..., C+4] * (1 - targets[..., C+4]), targets[..., C+4] * (1 - targets[..., C+4]), reduction='sum')
-
+    obj_mask = targets[..., C+4] > 0.5
+    noobj_mask = ~obj_mask
+    
+    obj_loss = F.mse_loss(
+        predictions[..., C+4][obj_mask], 
+        targets[..., C+4][obj_mask], 
+        reduction='sum'
+    )
+    
+    noobj_loss = lambda_noobj * F.mse_loss(
+        predictions[..., C+4][noobj_mask], 
+        targets[..., C+4][noobj_mask], 
+        reduction='sum'
+    )
+    
     # 总损失
     total_loss = class_loss + coord_loss + obj_loss + noobj_loss
-    return total_loss
-
-
-def compute_iou_yolo(output_yolo, labels_yolo):
-    '''
-    output_yolo: torch.Tensor, 尺寸 (batch_size, Sx, Sy, num_classes + B*5)
-    labels_yolo: torch.Tensor, 尺寸 (batch_size, Sx, Sy, num_classes + B*5)
-    
-    '''
+    return total_loss/4
     
     
 

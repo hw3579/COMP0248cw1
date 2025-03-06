@@ -391,6 +391,83 @@ import platform
 from torch.amp import autocast, GradScaler
 from utils import segmentation_to_yolov3_1, yolo_loss
 
+# 计算类别权重
+def calculate_class_weights(dataset):
+    """计算分割任务的类别权重"""
+    print("计算类别权重...")
+    class_counts = {i: 0 for i in range(6)}  # 假设有6个类别（0-5）
+    
+    for idx in tqdm(range(len(dataset)), desc="分析类别分布"):
+        _, [label, _] = dataset[idx]
+        unique_classes, counts = torch.unique(label, return_counts=True)
+        
+        for cls, count in zip(unique_classes.tolist(), counts.tolist()):
+            if cls in class_counts:
+                class_counts[cls] += count
+    
+    print(f"类别分布: {class_counts}")
+    
+    # 计算权重（少数类获得更高权重）
+    total_pixels = sum(class_counts.values())
+    class_weights = torch.ones(6)  # 假设6个类别
+    for cls, count in class_counts.items():
+        if count > 0:
+            # 使用反比例权重并规范化
+            class_weights[cls] = total_pixels / (len(class_counts) * count)
+    
+    # 归一化权重
+    class_weights = class_weights / class_weights.sum() * len(class_counts)
+    print(f"类别权重: {class_weights}")
+    
+    return class_weights
+
+# 在文件顶部导入区添加这个类
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
+        """
+        Focal Loss 实现，用于语义分割
+        
+        参数:
+            alpha: 类别权重 (tensor)，形状为 (C,)
+            gamma: 聚焦参数，减少易分类样本的贡献
+            reduction: 'none'|'mean'|'sum'
+        """
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        self.reduction = reduction
+    
+    def forward(self, inputs, targets):
+        # inputs形状: [N, C, H, W]
+        # targets形状: [N, H, W]
+        
+        # 计算交叉熵损失 (无reduction)
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.alpha)
+        
+        # 获取概率预测
+        inputs_softmax = F.softmax(inputs, dim=1)
+        
+        # 创建one-hot编码的targets
+        targets_one_hot = F.one_hot(targets, num_classes=inputs.size(1))
+        targets_one_hot = targets_one_hot.permute(0, 3, 1, 2).float()  # [N, H, W, C] -> [N, C, H, W]
+        
+        # 计算目标类别的预测概率
+        pt = (inputs_softmax * targets_one_hot).sum(dim=1)  # [N, H, W]
+        
+        # 计算Focal Loss权重因子
+        focal_weight = (1 - pt) ** self.gamma
+        
+        # 应用Focal Loss权重
+        loss = focal_weight * ce_loss
+        
+        # 应用reduction
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        else:  # 'none'
+            return loss
 
 if __name__ == "__main__":
     # backbone_test()
@@ -426,9 +503,12 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
     total_loss = []
     total_acc = []
-    num_epochs = 100
+    num_epochs = 250
 
-    criterion = nn.CrossEntropyLoss()  # 默认会忽略不合法类别
+    # criterion = nn.CrossEntropyLoss()  # 默认会忽略不合法类别
+    class_weights = calculate_class_weights(train_dataset)
+    class_weights = class_weights.to(device)
+    criterion = FocalLoss(alpha=class_weights, gamma=2.0)
 
     lambda_yolo = 0
 
@@ -449,10 +529,10 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             if is_use_autoscale:
                 with autocast(device_type=str(device)):
+                    # 在训练循环中使用修改后的损失函数
                     pred, pred_yolo = model(images)
                     seg_loss = criterion(pred, labels_segment)
-                    yolo_loss_val = yolo_loss(pred_yolo, labels_yolo, 8, 6, 1, 5)
-
+                    yolo_loss_val = yolo_loss(pred_yolo, labels_yolo, 8, 6, 1, 5, gamma=2.0, alpha=0.25)
 
                     lambda_yolo = seg_loss_per_epoch / (yolo_loss_per_epoch + 1e-8)
 
@@ -509,29 +589,29 @@ if __name__ == "__main__":
                 json.dump(data, f)
 
         # early stopping
-        # patience = 10  # 连续多少个epoch没改善就停止
-        # min_delta = 0.0005  # 改善的最小阈值
+        patience = 10  # 连续多少个epoch没改善就停止
+        min_delta = 0.0005  # 改善的最小阈值
         
-        # # 初始化早停所需变量
-        # if epoch == 0:
-        #     best_loss = loss_per_epoch
-        #     best_epoch = 0
-        #     counter = 0
-        # # 判断是否有改善
-        # elif loss_per_epoch < best_loss - min_delta:
-        #     best_loss = loss_per_epoch
-        #     best_epoch = epoch
-        #     counter = 0
-        #     # 保存最佳模型
-        #     torch.save(model, 'results/deeplabmodel_best.pth')
-        # else:
-        #     counter += 1
-        #     print(f"Early stopping counter: {counter}/{patience}")
+        # 初始化早停所需变量
+        if epoch == 0:
+            best_loss = loss_per_epoch
+            best_epoch = 0
+            counter = 0
+        # 判断是否有改善
+        elif loss_per_epoch < best_loss - min_delta:
+            best_loss = loss_per_epoch
+            best_epoch = epoch
+            counter = 0
+            # 保存最佳模型
+            torch.save(model, 'results/deeplabmodelfullfinal.pth')
+        else:
+            counter += 1
+            print(f"Early stopping counter: {counter}/{patience}")
             
-        # # 如果连续patience个epoch没有改善，停止训练
-        # if counter >= patience:
-        #     print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with loss {best_loss:.4f}")
-        #     break
+        # 如果连续patience个epoch没有改善，停止训练
+        if counter >= patience:
+            print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with loss {best_loss:.4f}")
+            break
 
     # 保存模型及训练指标
     # torch.save(model, 'results/deeplabmodelfull3.5.pth')
