@@ -496,6 +496,14 @@ if __name__ == "__main__":
     #test_compute_iou()
 
 
+    # 在if __name__ == "__main__":之后、训练循环之前添加
+    # 检查并清除可能存在的退出标记文件
+    exit_file = "exit_training.txt"
+    if os.path.exists(exit_file):
+        os.remove(exit_file)
+    print(f"训练过程中，创建文件 '{exit_file}' 将保存当前模型并退出训练")
+
+
     # start training
     is_use_autoscale = True
 
@@ -523,7 +531,7 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
     total_loss = []
     total_acc = []
-    num_epochs = 250
+    num_epochs = 500
 
     # criterion = nn.CrossEntropyLoss()  # 默认会忽略不合法类别
     class_weights = calculate_class_weights(train_dataset)
@@ -556,7 +564,7 @@ if __name__ == "__main__":
 
                     lambda_yolo = seg_loss_per_epoch / (yolo_loss_per_epoch + 1e-8)
 
-                    batch_total_loss = seg_loss + yolo_loss_val * lambda_yolo
+                    batch_total_loss = 5 * seg_loss + yolo_loss_val * lambda_yolo
                 
                 # 使用正确的损失进行缩放和反向传播
                 scaler.scale(batch_total_loss).backward()
@@ -613,7 +621,7 @@ if __name__ == "__main__":
         # early stopping
         patience = 10  # 连续多少个epoch没改善就停止
         min_delta = 1e-4  # 改善的最小阈值
-        min_epochs_before_earlystop = 75  # 至少训练这么多epoch才开始检查早停
+        min_epochs_before_earlystop = 2000  # 至少训练这么多epoch才开始检查早停
 
         # 初始化早停所需变量
         if epoch == 0:
@@ -639,6 +647,26 @@ if __name__ == "__main__":
         if counter >= patience and epoch >= min_epochs_before_earlystop:
             print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with loss {best_loss:.4f}")
             break
+        # 在for epoch循环内，在每个epoch结束位置添加
+        # 检查是否应该退出训练
+        if os.path.exists(exit_file):
+            print("\n检测到退出信号，正在保存模型和训练数据...")
+            # 保存当前模型（使用特殊名称以避免覆盖最佳模型）
+            torch.save(model, 'results/deeplabmodelfullfinal_interrupted.pth')
+            import json
+            data = {
+                'loss': total_loss,
+                'accuracy': total_acc,
+                'last_epoch': epoch
+            }
+            with open('results/deeplabmodeldatafinal_interrupted.json', 'w') as f:
+                json.dump(data, f)
+            
+            # 删除触发文件
+            os.remove(exit_file)
+            print("保存完成，训练已退出。")
+            break
+
 
     # 保存模型及训练指标
     # torch.save(model, 'results/deeplabmodelfull3.5.pth')
