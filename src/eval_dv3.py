@@ -13,7 +13,7 @@ from collections import defaultdict
 
 # 导入自定义模块
 from train_deeplabv3 import compute_iou, TotalDeepLabV3Plus, FocalLoss, calculate_class_weights
-from train_deeplabv3 import ResNetHead, ASPP, DeepLabV3PlusDecoder, ConvBlock, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead, TotalDeepLabV3Plus, StageBlockmid
+from train_deeplabv3 import ResNetHead, ASPP, DeepLabV3PlusDecoder, ConvBlock, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead, TotalDeepLabV3Plus, StageBlockmid, StageBlock4_2
 from dataloader import Comp0249Dataset
 from utils import compute_iou_yolo
 
@@ -130,7 +130,7 @@ def draw_the_box(image, boxes, nms_threshold=0.45):
     try:
         S_h, S_w = boxes.shape[:2]
         detection_count = 0
-        confidence_threshold = 0.3
+        confidence_threshold = 0.5
         
         # 收集所有有效框的数据用于NMS
         all_boxes = []  # 格式: [x1, y1, x2, y2]

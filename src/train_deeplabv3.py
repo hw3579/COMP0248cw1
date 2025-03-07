@@ -371,7 +371,7 @@ class YOLOHead(nn.Module):
         x = self.conv_layers(x)  # 输出 (batch, C+B*5, 20, 15)
         
         # 调整到目标尺寸 (6x8)
-        x = F.interpolate(x, size=(self.Sy, self.Sx), mode='bilinear', align_corners=True)
+        x = F.interpolate(x, size=(6, 8), mode='bilinear', align_corners=True)
         
         # 调整通道顺序：[batch, channels, height, width] -> [batch, height, width, channels]
         return x.permute(0, 2, 3, 1)  # 输出形状: [batch_size, 6, 8, C + B*5]
@@ -585,6 +585,21 @@ if __name__ == "__main__":
     print(f"训练过程中，创建文件 '{exit_file}' 将保存当前模型并退出训练")
 
 
+
+    # 定义图像增强策略
+    transform = transforms.Compose([
+        # 将tensor转为PIL以应用transforms
+        transforms.ToPILImage(),
+        # 随机水平翻转
+        transforms.RandomHorizontalFlip(p=0.5),
+        # 随机调整亮度、对比度、饱和度、色调
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05),
+        # 随机旋转、平移和缩放
+        transforms.RandomAffine(degrees=5, translate=(0.05, 0.05), scale=(0.95, 1.05)),
+        # 转回tensor
+        transforms.ToTensor(),
+    ])
+
     # start training
     is_use_autoscale = True
 
@@ -602,8 +617,8 @@ if __name__ == "__main__":
             train_loader = DataLoader(train_dataset, batch_size=10, shuffle=True, num_workers=10)
 
 
-    model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
-    # model = torch.load('results/deeplabmodelfullfinal_interrupted.pth', weights_only=False)
+    # model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
+    model = torch.load('results/deeplabmodelfullfinal_interrupted.pth', weights_only=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 

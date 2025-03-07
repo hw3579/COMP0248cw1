@@ -442,7 +442,7 @@ def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noo
     noobj_mask = ~obj_mask
     
     # 1. 只对有目标的网格计算类别损失(使用Focal Loss)
-    bce_loss = F.binary_cross_entropy_with_logits(pred_class, target_class, reduction='none')
+    bce_loss = F.mse_loss(pred_class, target_class, reduction='none')
     pt = torch.exp(-bce_loss)
     
     # 区分正负样本的alpha
