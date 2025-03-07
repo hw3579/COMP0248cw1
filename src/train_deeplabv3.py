@@ -13,6 +13,9 @@ import numpy as np
 from dataloader import Comp0249Dataset
 from tqdm import tqdm
 
+# 在文件开头的导入部分添加
+import datetime
+
 # 定义 ResNet-like 结构
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, mid_channels, out_channels, stride=1, is_res=False):
@@ -37,24 +40,28 @@ class ConvBlock(nn.Module):
         self.mix_relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
+        identity = x
+        
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+        
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu2(out)
+        
+        out = self.conv3(out)
+        out = self.bn3(out)
+        # 注意这里没有ReLU
+        
         if self.is_res:
-            res = self.conv_res(x)
-            res = self.bn_res(res)
-
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu1(x)
-
-        x = self.conv2(x)
-        x = self.bn2(x)
-        x = self.relu2(x)
-
-        x = self.conv3(x)
-        x = self.bn3(x)
-        if self.is_res:
-            x += res
-        x = self.mix_relu(x)
-        return x
+            identity = self.conv_res(x)
+            identity = self.bn_res(identity)
+        
+        out += identity
+        out = self.mix_relu(out)  # 只在残差连接后应用一次ReLU
+        
+        return out
 
 
 def test_convblock():
@@ -118,6 +125,31 @@ class StageBlock4(nn.Module):
         x = self.convblock3(x)
         return x
 
+class StageBlock4_2(nn.Module):
+    def __init__(self):
+        super(StageBlock4_2, self).__init__()
+        self.convblock1 = ConvBlock(1024, 512, 2048, stride=3, is_res=True)
+        self.convblock2 = ConvBlock(2048, 512, 2048)
+        self.convblock3 = ConvBlock(2048, 512, 2048)
+
+    def forward(self, x):
+        x = self.convblock1(x)
+        x = self.convblock2(x)
+        x = self.convblock3(x)
+        return x
+
+class StageBlockmid(nn.Module):
+    def __init__(self):
+        super(StageBlockmid, self).__init__()
+        self.convblock1 = ConvBlock(2048, 1024, 4096, stride=5, is_res=True)
+        self.convblock2 = ConvBlock(4096, 1024, 4096)
+        self.convblock3 = ConvBlock(4096, 1024, 4096)
+
+    def forward(self, x):
+        x = self.convblock1(x)
+        x = self.convblock2(x)
+        x = self.convblock3(x)
+        return x
 
 def test_stageblock1():  
     model = StageBlock1()
@@ -142,6 +174,9 @@ class ResNetHead(nn.Module):
         self.stage2 = StageBlock2()
         self.stage3 = StageBlock3()
         self.stage4 = StageBlock4()
+        self.stage4_2 = StageBlock4_2()
+
+        # self.extra_conv = nn.Conv2d(512, 2048, kernel_size=3, stride=2, padding=2, dilation=2)
     
     def forward(self, x):
         x = self.conv1(x)
@@ -149,13 +184,14 @@ class ResNetHead(nn.Module):
         x = self.stage1(x)
         x = self.stage2(x)
         x = self.stage3(x)
-        x = self.stage4(x)
-        return x
+        x_1 = self.stage4(x)
+        x_2 = self.stage4_2(x)
+        return x_1, x_2
 
 def test_resnethead():
     model = ResNetHead()
     # print(model)
-    random_tensor = torch.randn(1, 3, 224, 224)
+    random_tensor = torch.randn(1, 3, 960, 720)
     output = model(random_tensor) # 1, 2048, 30, 23
     print(output.shape)
 if __name__ == "__main__":
@@ -272,30 +308,74 @@ class DeepLabV3PlusDecoder(nn.Module):
         return x  # 输出分割结果 (480x480xnum_classes)
 
 import math
+# class YOLOHead(nn.Module): 
+#     def __init__(self, in_channels, num_classes, Sx, Sy):
+#         super(YOLOHead, self).__init__()
+#         self.C = num_classes - 1 # 不包括背景 
+#         self.B = 1
+#         self.Sx = math.ceil(Sx)
+#         self.Sy = math.ceil(Sy)
+#         self.adaptive = nn.AdaptiveAvgPool2d((6, 8))  # 强制将输出调整为 (batch, 1024, 3, 3)
+#         self.convmid = StageBlockmid()
+        
+#         # 使用卷积层代替全连接层
+#         self.fc_layers = nn.Sequential(
+#             nn.Flatten(),
+#             nn.Linear(6 * 8 * 4096, 1024),
+#             nn.LeakyReLU(0.1),
+#             nn.Dropout(0.5),
+#             nn.Linear(1024, 8 * 6 * (self.C + self.B * 5))  # 输出 final_size x final_size x (类别数+边界框数*5)
+#         )
+    
+#     def forward(self, x): # 进来的是2048x20x15
+#         # x形状: [batch_size, in_channels, H/32, W/32]
+#         # x = self.adaptive(x)
+#         x = self.convmid(x)
+#         x = F.interpolate(x, size=(6, 8), mode='bilinear', align_corners=True)
+#         x = self.fc_layers(x)
+
+#         return x.view(-1, 6, 8, self.C + self.B * 5)  # 输出形状: [batch_size, 8, 6, C + B*5]
+
+
 class YOLOHead(nn.Module):
     def __init__(self, in_channels, num_classes, Sx, Sy):
         super(YOLOHead, self).__init__()
-        self.C = num_classes - 1 # 不包括背景 
+        self.C = num_classes - 1  # 不包括背景 
         self.B = 1
         self.Sx = math.ceil(Sx)
         self.Sy = math.ceil(Sy)
-        self.adaptive = nn.AdaptiveAvgPool2d((6, 8))  # 强制将输出调整为 (batch, 1024, 3, 3)
         
-        # 使用卷积层代替全连接层
-        self.fc_layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(6 * 8 * 2048, 4096),
+        # 全卷积网络实现
+        self.conv_layers = nn.Sequential(
+            # 第一层：2048 -> 1024
+            nn.Conv2d(in_channels, 1024, kernel_size=3, padding=1),
+            nn.BatchNorm2d(1024),
             nn.LeakyReLU(0.1),
-            nn.Dropout(0.5),
-            nn.Linear(4096, 8 * 6 * (self.C + self.B * 5))  # 输出 final_size x final_size x (类别数+边界框数*5)
+            
+            # 第二层：1024 -> 512
+            nn.Conv2d(1024, 512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.1),
+            
+            # 第三层：512 -> 256
+            nn.Conv2d(512, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.1),
+            
+            # 最后输出层：256 -> (C+B*5)
+            nn.Conv2d(256, self.C + self.B * 5, kernel_size=1)
         )
-    
-    def forward(self, x):
-        # x形状: [batch_size, in_channels, H/32, W/32]
-        x = self.adaptive(x)
-        x = self.fc_layers(x)
+        
+    def forward(self, x):  # 进来的是2048x20x15
+        # 应用卷积层
+        x = self.conv_layers(x)  # 输出 (batch, C+B*5, 20, 15)
+        
+        # 调整到目标尺寸 (6x8)
+        x = F.interpolate(x, size=(self.Sy, self.Sx), mode='bilinear', align_corners=True)
+        
+        # 调整通道顺序：[batch, channels, height, width] -> [batch, height, width, channels]
+        return x.permute(0, 2, 3, 1)  # 输出形状: [batch_size, 6, 8, C + B*5]
 
-        return x.view(-1, 6, 8, self.C + self.B * 5)  # 输出形状: [batch_size, 8, 6, C + B*5]
 
 class TotalDeepLabV3Plus(nn.Module):
     def __init__(self, num_classes, w=960, h=720):
@@ -306,12 +386,12 @@ class TotalDeepLabV3Plus(nn.Module):
         self.yolo_head = YOLOHead(2048, num_classes, w/32, h/32)
 
     def forward(self, x):
-        x = self.backbone(x)
+        x, x_yolo = self.backbone(x)
         # batch, 2048, 30, 23
 
         x_seg = self.aspp(x)    
         x_seg = self.decoder(x_seg)
-        x_yolo = self.yolo_head(x)
+        x_yolo = self.yolo_head(x_yolo)
 
         return x_seg, x_yolo
 
@@ -334,10 +414,11 @@ def totalDeepLabV3Plus_test():
     # print(model)
     random_tensor = torch.randn(1, 3, 720, 960)
     output = model(random_tensor) # 1, 21, 480, 480
-    print(output.shape)
+    print(output[0].shape, output[1].shape)
 
 if __name__ == "__main__":
     # totalDeepLabV3Plus_test() # pass
+    # test_resnethead() # pass
     pass
 
 def compute_iou(pred, labels, num_classes=6):
@@ -389,7 +470,7 @@ def test_compute_iou():
 
 import platform
 from torch.amp import autocast, GradScaler
-from utils import segmentation_to_yolov3_1, yolo_loss
+from utils import segmentation_to_yolov3_1, yolo_loss, compute_iou_yolo
 import os
 
 # 计算类别权重
@@ -513,7 +594,7 @@ if __name__ == "__main__":
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
         if platform.system() == 'Linux':
-            train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True)
+            train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True)
     else:
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=6, shuffle=True, num_workers=0)
@@ -522,12 +603,12 @@ if __name__ == "__main__":
 
 
     model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
-    # model = torch.load('results/deeplabmodelfull3.5.pth', weights_only=False)
+    # model = torch.load('results/deeplabmodelfullfinal_interrupted.pth', weights_only=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)  # 稍微提高初始学习率
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)  # 稍微提高初始学习率
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
     total_loss = []
     total_acc = []
@@ -548,6 +629,7 @@ if __name__ == "__main__":
         seg_loss_per_epoch = 0.0
         yolo_loss_per_epoch = 0.0
         acc_per_epoch = 0.0
+        yolo_acc_per_epoch = 0.0  # 新增YOLO准确率统计变量
 
         for images, labels in tqdm(train_loader, desc="Batches"):
             images = images.to(device, dtype=torch.float32)
@@ -564,7 +646,7 @@ if __name__ == "__main__":
 
                     lambda_yolo = seg_loss_per_epoch / (yolo_loss_per_epoch + 1e-8)
 
-                    batch_total_loss = 5 * seg_loss + yolo_loss_val * lambda_yolo
+                    batch_total_loss = seg_loss + yolo_loss_val * lambda_yolo
                 
                 # 使用正确的损失进行缩放和反向传播
                 scaler.scale(batch_total_loss).backward()
@@ -590,33 +672,35 @@ if __name__ == "__main__":
             _, batch_acc = compute_iou(pred, labels_segment)
             acc_per_epoch += batch_acc
 
+                    # 添加：计算YOLO准确率
+            with torch.no_grad():
+                batch_yolo_iou, _ = compute_iou_yolo(pred_yolo, labels_yolo)
+                yolo_acc_per_epoch += batch_yolo_iou
+
         # 计算每个epoch的平均损失和准确率
         seg_loss_per_epoch /= len(train_loader)
         yolo_loss_per_epoch /= len(train_loader)
         loss_per_epoch /= len(train_loader)
         acc_per_epoch /= len(train_loader)
+        yolo_acc_per_epoch /= len(train_loader)  # 计算YOLO平均准确率
+
         
         print(f"segloss:{seg_loss_per_epoch:.4f}, yololoss:{yolo_loss_per_epoch:.4f}")
-        print(f"Epoch: {epoch}, Loss: {loss_per_epoch:.4f}, Acc: {acc_per_epoch:.4f}")
+        print(f"Epoch: {epoch}, Loss: {loss_per_epoch:.4f}, Acc: {acc_per_epoch:.4f}, YOLO Acc: {yolo_acc_per_epoch:.4f}")
 
         total_loss.append(loss_per_epoch)
         total_acc.append(acc_per_epoch)
         
+
+        # 添加：记录YOLO准确率
+        if 'total_yolo_acc' not in locals():
+            total_yolo_acc = []
+        total_yolo_acc.append(yolo_acc_per_epoch)
+
+
         # 学习率调整
         scheduler.step(loss_per_epoch)
 
-
-        if (epoch + 1) % 5 == 0:
-            torch.save(model, 'results/deeplabmodelfullfinal.pth')
-            import json
-            data = {
-                'loss': total_loss,
-                'accuracy': total_acc
-            }
-            with open('results/deeplabmodeldatafinal.json', 'w') as f:
-                json.dump(data, f)
-
-        # 替换原有的早停逻辑代码块
 
         # early stopping
         patience = 10  # 连续多少个epoch没改善就停止
@@ -647,26 +731,44 @@ if __name__ == "__main__":
         if counter >= patience and epoch >= min_epochs_before_earlystop:
             print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with loss {best_loss:.4f}")
             break
-        # 在for epoch循环内，在每个epoch结束位置添加
-        # 检查是否应该退出训练
+
+
+
+
+        # 修改检测退出信号的代码段
         if os.path.exists(exit_file):
             print("\n检测到退出信号，正在保存模型和训练数据...")
-            # 保存当前模型（使用特殊名称以避免覆盖最佳模型）
-            torch.save(model, 'results/deeplabmodelfullfinal_interrupted.pth')
+            
+            # 生成时间戳
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # 保存当前模型（使用特殊名称和时间戳以避免覆盖）
+            model_filename = f'results/deeplabmodelfullfinal_interrupted.pth'
+            torch.save(model, model_filename)
+            
             import json
+            # 在检测退出信号的代码段中修改data字典
             data = {
                 'loss': total_loss,
                 'accuracy': total_acc,
-                'last_epoch': epoch
-            }
-            with open('results/deeplabmodeldatafinal_interrupted.json', 'w') as f:
+                'yolo_accuracy': total_yolo_acc,  # 添加YOLO准确率记录
+                'last_epoch': epoch,
+                'best_loss': best_loss,
+                'best_epoch': best_epoch,
+                'learning_rate': optimizer.param_groups[0]['lr'],
+                'interrupt_time': timestamp
+                }
+            
+            # 保存训练数据，同样使用时间戳
+            data_filename = f'results/deeplabmodeldatafinal_interrupted_{timestamp}.json'
+            with open(data_filename, 'w') as f:
                 json.dump(data, f)
             
             # 删除触发文件
             os.remove(exit_file)
-            print("保存完成，训练已退出。")
+            print(f"保存完成，文件已保存为:\n- {model_filename}\n- {data_filename}")
+            print("训练已退出。")
             break
-
 
     # 保存模型及训练指标
     # torch.save(model, 'results/deeplabmodelfull3.5.pth')

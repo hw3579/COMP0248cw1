@@ -2,10 +2,10 @@ from matplotlib import pyplot as plt
 import numpy as np
 import json
 import math
-read_deeplabdata = 0
+read_deeplabdata = 1
 read_yolov1data = 0
 read_yolov3data = 0
-read_finaldeeplabdata = 1
+read_finaldeeplabdata = 0
 
 if read_deeplabdata:
 # 从 JSON 文件中读取数据
