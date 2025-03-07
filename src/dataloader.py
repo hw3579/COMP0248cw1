@@ -201,7 +201,7 @@ class Comp0249Dataset(Dataset):
         
         if self.version == "binary":
             binary_label = label_gray  
-            yolo_label = segmentation_to_yolov3_1(label_gray, Sx = 8, Sy = 6 , num_classes=5, B=1, scale=1)
+            yolo_label = segmentation_to_yolov3_1(label_gray, Sx = 20, Sy = 15 , num_classes=5, B=1, scale=1)
 
            
         # elif self.version == "yolov1":

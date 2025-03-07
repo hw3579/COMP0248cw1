@@ -18,25 +18,26 @@ from dataloader import Comp0249Dataset
 from utils import compute_iou_yolo
 
 
-# 修改NMS函数以修复计算问题并增加调试信息
-
-def nms(boxes, scores, classes, iou_threshold=0.45):
+def enhanced_nms(boxes, scores, classes, iou_threshold=0.45, merge_threshold=0.25):
     """
-    执行非极大值抑制
+    增强版NMS：应用标准NMS后，对仍然重叠的框进行融合
     
     参数:
         boxes: 边界框坐标 [x1, y1, x2, y2] 的列表
         scores: 每个边界框的置信度
         classes: 每个边界框的类别
-        iou_threshold: IoU阈值，高于此值的重叠框将被抑制
-        
+        iou_threshold: 标准NMS的IoU阈值
+        merge_threshold: 框融合的IoU阈值
+    
     返回:
-        保留的边界框索引列表
+        保留的边界框索引列表, 融合后的边界框列表, 融合后的置信度, 融合后的类别
     """
+    import torchvision.ops as ops
+    
     if len(boxes) == 0:
-        return []
-        
-    # 确保输入是numpy数组
+        return [], [], [], []
+    
+    # 转换为numpy数组
     boxes = np.array(boxes)
     scores = np.array(scores)
     classes = np.array(classes)
@@ -45,10 +46,8 @@ def nms(boxes, scores, classes, iou_threshold=0.45):
     keep_indices = []
     unique_classes = np.unique(classes)
     
-    print(f"NMS统计：共 {len(boxes)} 个框，{len(unique_classes)} 个唯一类别")
-    
+    # 标准NMS处理
     for cls in unique_classes:
-        # 获取该类别的所有框
         cls_indices = np.where(classes == cls)[0]
         if len(cls_indices) == 0:
             continue
@@ -56,52 +55,100 @@ def nms(boxes, scores, classes, iou_threshold=0.45):
         cls_boxes = boxes[cls_indices]
         cls_scores = scores[cls_indices]
         
-        print(f"  类别 {cls}: {len(cls_indices)} 个框")
+        # 使用torchvision的nms函数
+        cls_boxes_tensor = torch.tensor(cls_boxes, dtype=torch.float32)
+        cls_scores_tensor = torch.tensor(cls_scores, dtype=torch.float32)
+        keep_tensor = ops.nms(cls_boxes_tensor, cls_scores_tensor, iou_threshold)
         
-        # 按置信度降序排序
-        order = cls_scores.argsort()[::-1]
-        keep_cls = []
-        
-        while order.size > 0:
-            # 保留分数最高的框
-            i = order[0]
-            keep_cls.append(cls_indices[i])
-            
-            # 只剩一个框时结束
-            if order.size == 1:
-                break
-                
-            # 计算IoU
-            # 注意：移除 +1 偏移，使用标准的IoU计算
-            xx1 = np.maximum(cls_boxes[i, 0], cls_boxes[order[1:], 0])
-            yy1 = np.maximum(cls_boxes[i, 1], cls_boxes[order[1:], 1])
-            xx2 = np.minimum(cls_boxes[i, 2], cls_boxes[order[1:], 2])
-            yy2 = np.minimum(cls_boxes[i, 3], cls_boxes[order[1:], 3])
-            
-            w = np.maximum(0.0, xx2 - xx1)  # 移除+1
-            h = np.maximum(0.0, yy2 - yy1)  # 移除+1
-            inter = w * h
-            
-            area1 = (cls_boxes[i, 2] - cls_boxes[i, 0]) * (cls_boxes[i, 3] - cls_boxes[i, 1])  # 移除+1
-            area2 = (cls_boxes[order[1:], 2] - cls_boxes[order[1:], 0]) * (cls_boxes[order[1:], 3] - cls_boxes[order[1:], 1])  # 移除+1
-            
-            iou = inter / (area1 + area2 - inter + 1e-10)  # 添加小量以防止除零
-            
-            # 打印一些IoU值样本
-            if len(iou) > 0:
-                print(f"    样本IoU值: {iou[:min(3, len(iou))]}")
-                
-            # 保留IoU小于阈值的框
-            inds = np.where(iou <= iou_threshold)[0]
-            order = order[inds + 1]  # +1是因为第一个已经处理了
-            
-        print(f"  类别 {cls}: 保留 {len(keep_cls)} 个框，移除 {len(cls_indices) - len(keep_cls)} 个框")
+        keep_cls = [cls_indices[i] for i in keep_tensor.cpu().numpy()]
         keep_indices.extend(keep_cls)
+    
+    # 没有框或只有一个框时直接返回
+    if len(keep_indices) <= 1:
+        return keep_indices, boxes[keep_indices] if keep_indices else [], scores[keep_indices] if keep_indices else [], classes[keep_indices] if keep_indices else []
+    
+    # 处理NMS后的框，查找仍有重叠的框
+    kept_boxes = boxes[keep_indices]
+    kept_scores = scores[keep_indices]
+    kept_classes = classes[keep_indices]
+    
+    # 计算IoU矩阵
+    def calculate_iou(box1, box2):
+        """计算两个框的IoU"""
+        # 获取交集
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
         
-    return keep_indices
-
-
-
+        if x2 < x1 or y2 < y1:
+            return 0.0
+            
+        intersection = (x2 - x1) * (y2 - y1)
+        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        union = area1 + area2 - intersection
+        
+        return intersection / union if union > 0 else 0
+    
+    # 创建标记数组，标记已经被融合的框
+    is_merged = np.zeros(len(kept_boxes), dtype=bool)
+    merged_boxes = []
+    merged_scores = []
+    merged_classes = []
+    
+    # 框融合
+    for i in range(len(kept_boxes)):
+        if is_merged[i]:
+            continue
+            
+        # 找到与当前框重叠的所有框
+        current_box = kept_boxes[i]
+        current_score = kept_scores[i]
+        current_class = kept_classes[i]
+        
+        overlaps = []
+        for j in range(len(kept_boxes)):
+            if i != j and not is_merged[j] and kept_classes[j] == current_class:
+                iou = calculate_iou(current_box, kept_boxes[j])
+                if iou > merge_threshold:
+                    overlaps.append(j)
+        
+        # 如果有重叠框，融合它们
+        if overlaps:
+            # 标记所有要融合的框
+            is_merged[i] = True
+            for j in overlaps:
+                is_merged[j] = True
+                
+            # 收集所有要融合的框
+            boxes_to_merge = [current_box] + [kept_boxes[j] for j in overlaps]
+            scores_to_merge = [current_score] + [kept_scores[j] for j in overlaps]
+            
+            # 融合框：取最小x1,y1和最大x2,y2
+            x1 = min(box[0] for box in boxes_to_merge)
+            y1 = min(box[1] for box in boxes_to_merge)
+            x2 = max(box[2] for box in boxes_to_merge)
+            y2 = max(box[3] for box in boxes_to_merge)
+            
+            # 计算融合框的平均置信度
+            avg_score = sum(scores_to_merge) / len(scores_to_merge)
+            
+            # 添加融合后的框
+            merged_boxes.append([x1, y1, x2, y2])
+            merged_scores.append(avg_score)
+            merged_classes.append(current_class)
+        elif not is_merged[i]:
+            # 如果当前框没有被融合，直接添加
+            merged_boxes.append(current_box)
+            merged_scores.append(current_score)
+            merged_classes.append(current_class)
+            is_merged[i] = True
+    
+    print(f"NMS后剩余 {len(keep_indices)} 个框，融合后剩余 {len(merged_boxes)} 个框")
+    
+    # 返回原始索引和融合后的结果
+    return keep_indices, np.array(merged_boxes), np.array(merged_scores), np.array(merged_classes)
 # 修改draw_the_box函数以使用NMS
 
 def draw_the_box(image, boxes, nms_threshold=0.45):
@@ -130,7 +177,7 @@ def draw_the_box(image, boxes, nms_threshold=0.45):
     try:
         S_h, S_w = boxes.shape[:2]
         detection_count = 0
-        confidence_threshold = 0.5
+        confidence_threshold = 0.9
         
         # 收集所有有效框的数据用于NMS
         all_boxes = []  # 格式: [x1, y1, x2, y2]
@@ -180,19 +227,22 @@ def draw_the_box(image, boxes, nms_threshold=0.45):
         
         print(f"检测到 {len(all_boxes)} 个初始框")
         
-        # 第二步：应用NMS
+        # 应用增强版NMS
         if len(all_boxes) > 0:
-            keep_indices = nms(all_boxes, all_scores, all_classes, iou_threshold=nms_threshold)
+            keep_indices, merged_boxes, merged_scores, merged_classes = enhanced_nms(
+                all_boxes, all_scores, all_classes, 
+                iou_threshold=0.3,  # 传统NMS阈值
+                merge_threshold=0.2  # 框融合阈值
+            )
             
-            print(f"NMS后保留 {len(keep_indices)} 个框")
+            print(f"融合后剩余 {len(merged_boxes)} 个框")
             
-            # 第三步：绘制保留的框
-            for i in keep_indices:
+            # 绘制融合后的框
+            for i in range(len(merged_boxes)):
                 detection_count += 1
-                x1, y1, x2, y2 = all_boxes[i]
-                class_idx = all_classes[i]
-                confidence = all_scores[i]
-                class_prob = all_metadata[i]['class_prob']
+                x1, y1, x2, y2 = [int(c) for c in merged_boxes[i]]
+                class_idx = merged_classes[i]
+                confidence = merged_scores[i]
                 
                 # 根据类别选择颜色
                 color = (0, 255, 0)  # 默认绿色
@@ -211,6 +261,10 @@ def draw_the_box(image, boxes, nms_threshold=0.45):
                 cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
                 
                 # 添加类别标签
+                class_prob = 1.0  # 默认值
+                if i < len(keep_indices) and keep_indices[i] < len(all_metadata):
+                    class_prob = all_metadata[keep_indices[i]]['class_prob']
+                
                 label = f"C{class_idx}: {class_prob:.2f} Conf:{confidence:.2f}"
                 cv2.putText(image, label, (x1, y1-10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
@@ -271,6 +325,8 @@ detection_metrics = {
 class_weights = calculate_class_weights(test_dataset)
 class_weights = class_weights.to(device)
 criterion = FocalLoss(alpha=class_weights, gamma=2.0)
+
+criterion = nn.CrossEntropyLoss()
 
 # 主评估循环
 print("开始评估...")
@@ -463,7 +519,7 @@ for i in range(num_samples):
     
     # 预测框应用NMS
     plt.subplot(num_samples, 2, i*2+2)
-    img_with_pred_boxes = draw_the_box(all_images[i].copy(), all_pred_boxes[i], nms_threshold=0.45)
+    img_with_pred_boxes = draw_the_box(all_images[i].copy(), all_pred_boxes[i], nms_threshold=0.05)
     plt.imshow(img_with_pred_boxes)
     plt.title(f"Sample {i+1} - Predicted Boxes (NMS)")
     plt.axis('off')

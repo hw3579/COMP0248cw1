@@ -429,8 +429,21 @@ from torch.nn import functional as F
 #     total_loss = class_loss + coord_loss + obj_loss + noobj_loss
 #     return total_loss/4
 
-def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noobj=0.5, gamma=2.0, alpha=0.25):
-    """修正后的YOLO损失函数计算"""
+def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noobj=0.5, gamma=2.0, alpha=0.25, imbalanced_mode=False):
+    """修正后的YOLO损失函数计算，支持不平衡数据处理模式
+    
+    参数:
+        predictions: 模型预测结果
+        targets: 目标标签
+        Sx, Sy: YOLO网格尺寸
+        B: 每个网格的边界框数量
+        C: 类别数量
+        lambda_coord: 坐标损失权重
+        lambda_noobj: 无目标网格的置信度损失权重
+        gamma: Focal Loss的gamma参数
+        alpha: Focal Loss的alpha参数
+        imbalanced_mode: 是否启用不平衡数据处理模式
+    """
     batch = predictions.shape[0]  # 获取batch大小
     
     # 获取预测和目标
@@ -441,6 +454,28 @@ def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noo
     obj_mask = (targets[..., C+4] > 0.5)
     noobj_mask = ~obj_mask
     
+    # 如果启用不平衡处理模式，计算类别权重
+    if imbalanced_mode:
+        # 统计每个类别的目标数量
+        class_counts = []
+        for c in range(C):
+            # 统计该类别的目标数量
+            class_mask = target_class[..., c] > 0.5
+            class_count = (class_mask & obj_mask).sum().float() + 1e-6  # 防止除零
+            class_counts.append(class_count)
+        
+        # 将类别数量转换为权重
+        class_counts = torch.tensor(class_counts, device=predictions.device)
+        total_count = class_counts.sum()
+        
+        # 类别权重与类别频率成反比
+        class_weights = total_count / (C * class_counts)
+        
+        # 归一化类别权重
+        class_weights = class_weights / class_weights.sum() * C
+    else:
+        class_weights = torch.ones(C, device=predictions.device)
+    
     # 1. 只对有目标的网格计算类别损失(使用Focal Loss)
     bce_loss = F.mse_loss(pred_class, target_class, reduction='none')
     pt = torch.exp(-bce_loss)
@@ -448,7 +483,15 @@ def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noo
     # 区分正负样本的alpha
     pos_mask = (target_class > 0.5)
     neg_mask = ~pos_mask
-    alpha_weight = pos_mask * alpha + neg_mask * (1-alpha)
+    
+    if imbalanced_mode:
+        # 对不同类别使用不同的alpha权重
+        alpha_weight = torch.zeros_like(target_class)
+        for c in range(C):
+            # 对于正样本，使用类别权重调整alpha
+            alpha_weight[..., c] = pos_mask[..., c] * (alpha * class_weights[c]) + neg_mask[..., c] * (1-alpha)
+    else:
+        alpha_weight = pos_mask * alpha + neg_mask * (1-alpha)
     
     # 应用Focal Loss权重
     focal_weight = alpha_weight * (1 - pt) ** gamma
@@ -459,7 +502,6 @@ def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noo
     class_loss = focal_loss.sum()
     
     # 2. 只对有目标的网格计算坐标损失
-    # 提取坐标预测
     pred_xy = predictions[..., C:C+2]
     pred_wh = predictions[..., C+2:C+4]
     target_xy = targets[..., C:C+2]
@@ -473,39 +515,70 @@ def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noo
     xy_loss = F.mse_loss(
         pred_xy * obj_expanded_xy, 
         target_xy * obj_expanded_xy, 
-        reduction='sum'
+        reduction='mean'
     )
     
     # 宽高损失使用平方根变换
     wh_loss = F.mse_loss(
         torch.sqrt(torch.abs(pred_wh) + 1e-6) * obj_expanded_wh, 
         torch.sqrt(torch.abs(target_wh) + 1e-6) * obj_expanded_wh, 
-        reduction='sum'
+        reduction='mean'
     )
     
     coord_loss = lambda_coord * (xy_loss + wh_loss)
     
-    # 3. 置信度损失计算不变
-    obj_conf_loss = F.mse_loss(
-        predictions[..., C+4][obj_mask], 
-        targets[..., C+4][obj_mask], 
-        reduction='sum'
-    )
+    # 3. 置信度损失计算
+    if imbalanced_mode and obj_mask.sum() > 0:
+        # 获取每个目标的类别索引
+        target_class_idx = torch.argmax(target_class, dim=-1)
+        
+        # 创建置信度权重矩阵
+        conf_weights = torch.ones_like(targets[..., C+4])
+        
+        # 对有目标的网格，根据类别频率设置权重
+        for i in range(batch):
+            for y in range(Sy):
+                for x in range(Sx):
+                    if obj_mask[i, y, x]:
+                        cls_idx = target_class_idx[i, y, x].item()
+                        conf_weights[i, y, x] = class_weights[cls_idx]
+        
+        obj_conf_loss = F.mse_loss(
+            predictions[..., C+4][obj_mask], 
+            targets[..., C+4][obj_mask], 
+            reduction='mean'
+        ) * conf_weights[obj_mask].mean()
+    else:
+        obj_conf_loss = F.mse_loss(
+            predictions[..., C+4][obj_mask], 
+            targets[..., C+4][obj_mask], 
+            reduction='mean'
+        )
     
-    noobj_conf_loss = lambda_noobj * F.mse_loss(
+    # 调整无目标损失的权重
+    lambda_noobj_adjusted = lambda_noobj
+    if imbalanced_mode:
+        # 如果有目标的网格很少，进一步降低无目标损失权重
+        obj_ratio = obj_mask.sum().float() / obj_mask.numel()
+        if obj_ratio < 0.01:  # 少于1%
+            lambda_noobj_adjusted = lambda_noobj * 0.5
+    
+    noobj_conf_loss = lambda_noobj_adjusted * F.mse_loss(
         predictions[..., C+4][noobj_mask], 
         targets[..., C+4][noobj_mask], 
-        reduction='sum'
+        reduction='mean'
     )
     
-    # 4. 更合理地归一化损失
-    # 计算有目标的网格数量
-    num_obj = obj_mask.sum().float() + 1e-6
-    
-    # 归一化损失
+    # 4. 归一化损失
     total_loss = class_loss + coord_loss + obj_conf_loss + noobj_conf_loss
-    return total_loss / (batch * num_obj)
     
+    if imbalanced_mode:
+        # 不平衡模式下不进行额外归一化
+        return total_loss
+    else:
+        # 原始归一化方式
+        num_obj = obj_mask.sum().float() + 1e-6
+        return total_loss / (batch * num_obj)
     
 
 

@@ -193,10 +193,11 @@ def test_resnethead():
     # print(model)
     random_tensor = torch.randn(1, 3, 960, 720)
     output = model(random_tensor) # 1, 2048, 30, 23
-    print(output.shape)
+    print(output[0].shape, output[1].shape)
 if __name__ == "__main__":
-    pass
     # test_resnethead() # pass in (3, 224, 224) tensor out (2048, 7, 7)
+
+    pass
 
 # class ResidualBlock(nn.Module):
 #     def __init__(self, in_channels, mid_channels, out_channels):
@@ -338,43 +339,45 @@ import math
 
 
 class YOLOHead(nn.Module):
-    def __init__(self, in_channels, num_classes, Sx, Sy):
+    def __init__(self, in_channels, num_classes, Sx=None, Sy=None):
         super(YOLOHead, self).__init__()
         self.C = num_classes - 1  # 不包括背景 
         self.B = 1
-        self.Sx = math.ceil(Sx)
-        self.Sy = math.ceil(Sy)
         
-        # 全卷积网络实现
-        self.conv_layers = nn.Sequential(
-            # 第一层：2048 -> 1024
-            nn.Conv2d(in_channels, 1024, kernel_size=3, padding=1),
-            nn.BatchNorm2d(1024),
-            nn.LeakyReLU(0.1),
-            
-            # 第二层：1024 -> 512
-            nn.Conv2d(1024, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.1),
-            
-            # 第三层：512 -> 256
-            nn.Conv2d(512, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.1),
-            
-            # 最后输出层：256 -> (C+B*5)
-            nn.Conv2d(256, self.C + self.B * 5, kernel_size=1)
-        )
+        # 保持输入尺寸不变的卷积网络
+        self.conv1 = nn.Conv2d(in_channels, 1024, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(1024)
+        self.act1 = nn.LeakyReLU(0.1)
         
-    def forward(self, x):  # 进来的是2048x20x15
-        # 应用卷积层
-        x = self.conv_layers(x)  # 输出 (batch, C+B*5, 20, 15)
+        self.conv2 = nn.Conv2d(1024, 512, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(512)
+        self.act2 = nn.LeakyReLU(0.1)
         
-        # 调整到目标尺寸 (6x8)
-        x = F.interpolate(x, size=(6, 8), mode='bilinear', align_corners=True)
+        self.conv3 = nn.Conv2d(512, 256, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(256)
+        self.act3 = nn.LeakyReLU(0.1)
         
+        # 输出层：保持空间维度不变，只改变通道数
+        self.conv_out = nn.Conv2d(256, self.C + self.B * 5, kernel_size=1)
+        
+    def forward(self, x):  # 输入 2048×20×15
+        # 应用卷积层，逐层处理，保持空间维度不变
+        x = self.conv1(x)  # 输出 1024×20×15
+        x = self.bn1(x)
+        x = self.act1(x)
+        
+        x = self.conv2(x)  # 输出 512×20×15
+        x = self.bn2(x)
+        x = self.act2(x)
+        
+        x = self.conv3(x)  # 输出 256×20×15
+        x = self.bn3(x)
+        x = self.act3(x)
+        
+        x = self.conv_out(x)  # 输出 (C+B*5)×20×15
+                
         # 调整通道顺序：[batch, channels, height, width] -> [batch, height, width, channels]
-        return x.permute(0, 2, 3, 1)  # 输出形状: [batch_size, 6, 8, C + B*5]
+        return x.permute(0, 2, 3, 1)  # 输出形状: [batch_size, 20, 15, C+B*5]
 
 
 class TotalDeepLabV3Plus(nn.Module):
@@ -573,7 +576,7 @@ class FocalLoss(nn.Module):
 if __name__ == "__main__":
     # backbone_test()
     # aspp_test()
-    # deeplabv3plus_test()
+    deeplabv3plus_test()
     #test_compute_iou()
 
 
@@ -607,7 +610,7 @@ if __name__ == "__main__":
 
     if is_use_autoscale:
         if platform.system() == 'Windows':
-            train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
+            train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=0, pin_memory=True)
         if platform.system() == 'Linux':
             train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=8, pin_memory=True, persistent_workers=True)
     else:
@@ -621,6 +624,8 @@ if __name__ == "__main__":
     model = torch.load('results/deeplabmodelfullfinal_interrupted.pth', weights_only=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
+    # from torchsummary import summary
+    # print(summary(model, (3, 720, 960)))
 
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)  # 稍微提高初始学习率
@@ -629,10 +634,10 @@ if __name__ == "__main__":
     total_acc = []
     num_epochs = 500
 
-    # criterion = nn.CrossEntropyLoss()  # 默认会忽略不合法类别
-    class_weights = calculate_class_weights(train_dataset)
-    class_weights = class_weights.to(device)
-    criterion = FocalLoss(alpha=class_weights, gamma=2.0)
+    criterion = nn.CrossEntropyLoss()  # 默认会忽略不合法类别
+    # class_weights = calculate_class_weights(train_dataset)
+    # class_weights = class_weights.to(device)
+    # criterion = FocalLoss(alpha=class_weights, gamma=2.0)
 
     lambda_yolo = 0
 
@@ -656,6 +661,22 @@ if __name__ == "__main__":
                 with autocast(device_type=str(device)):
                     # 在训练循环中使用修改后的损失函数
                     pred, pred_yolo = model(images)
+
+
+                    # pred, pred_yolo = images, labels_yolo
+
+                    # b, h, w = labels_segment.size()
+                    # num_classes = 6
+                    # pred_segment = torch.zeros(b, num_classes, h, w, device=device)
+                    # # 为每个标签在对应位置设置高值(10.0)，模拟softmax前的logits
+                    # for i in range(num_classes):
+                    #     pred_segment[:, i, :, :] = (labels_segment == i).float() * 10.0
+
+                    # pred = pred_segment
+
+
+
+
                     seg_loss = criterion(pred, labels_segment)
                     yolo_loss_val = yolo_loss(pred_yolo, labels_yolo, 8, 6, 1, 5, gamma=2.0, alpha=0.25)
 
@@ -689,7 +710,7 @@ if __name__ == "__main__":
 
                     # 添加：计算YOLO准确率
             with torch.no_grad():
-                batch_yolo_iou, _ = compute_iou_yolo(pred_yolo, labels_yolo)
+                batch_yolo_iou_, batch_yolo_iou = compute_iou_yolo(pred_yolo, labels_yolo)
                 yolo_acc_per_epoch += batch_yolo_iou
 
         # 计算每个epoch的平均损失和准确率
@@ -701,7 +722,7 @@ if __name__ == "__main__":
 
         
         print(f"segloss:{seg_loss_per_epoch:.4f}, yololoss:{yolo_loss_per_epoch:.4f}")
-        print(f"Epoch: {epoch}, Loss: {loss_per_epoch:.4f}, Acc: {acc_per_epoch:.4f}, YOLO Acc: {yolo_acc_per_epoch:.4f}")
+        print(f"Epoch: {epoch}, Loss: {loss_per_epoch:.4f}, Acc: {acc_per_epoch:.4f}, YOLO Class Acc: {yolo_acc_per_epoch:.4f}")
 
         total_loss.append(loss_per_epoch)
         total_acc.append(acc_per_epoch)
@@ -720,7 +741,7 @@ if __name__ == "__main__":
         # early stopping
         patience = 10  # 连续多少个epoch没改善就停止
         min_delta = 1e-4  # 改善的最小阈值
-        min_epochs_before_earlystop = 2000  # 至少训练这么多epoch才开始检查早停
+        min_epochs_before_earlystop = 75  # 至少训练这么多epoch才开始检查早停
 
         # 初始化早停所需变量
         if epoch == 0:
