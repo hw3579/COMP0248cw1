@@ -14,9 +14,10 @@ import matplotlib.pyplot as plt
 import os
 import pandas as pd
 
-from utils import segmentation_to_yolo
-from utils import segmentation_to_yolov3, segmentation_to_yolov3_1
-from utils import draw_the_yolo_label
+# from utils import segmentation_to_yolo
+# from utils import segmentation_to_yolov3,
+from utils import segmentation_to_yolov3_1
+# from utils import draw_the_yolo_label
 
 import random
 import os.path as osp

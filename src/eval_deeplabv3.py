@@ -9,7 +9,7 @@ from utils import cx_cy_to_corners
 import numpy as np
 from utils import draw_the_box
 from train_deeplabv3 import compute_iou
-from train_deeplabv3 import ConvBlock, ResNetHead, ASPP, DeepLabV3PlusDecoder, TotalDeepLabV3Plus, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead
+from model import ConvBlock, ResNetHead, ASPP, DeepLabV3PlusDecoder, TotalDeepLabV3Plus, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead
 import torch.nn as nn
 
 from utils import compute_iou_yolo

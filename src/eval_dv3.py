@@ -12,11 +12,11 @@ import torch.nn as nn
 from collections import defaultdict
 
 # 导入自定义模块
-from train_deeplabv3 import compute_iou, TotalDeepLabV3Plus, FocalLoss, calculate_class_weights
-from train_deeplabv3 import ResNetHead, ASPP, DeepLabV3PlusDecoder, ConvBlock, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead, TotalDeepLabV3Plus, StageBlockmid, StageBlock4_2
+from train_deeplabv3 import compute_iou, FocalLoss, calculate_class_weights
+from model import ResNetHead, ASPP, DeepLabV3PlusDecoder, ConvBlock, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead, TotalDeepLabV3Plus, StageBlockmid, StageBlock4_2
 from dataloader import Comp0249Dataset
 from utils import compute_iou_yolo
-
+import torchvision.ops as ops
 
 def enhanced_nms(boxes, scores, classes, iou_threshold=0.45, merge_threshold=0.25):
     """
@@ -32,7 +32,7 @@ def enhanced_nms(boxes, scores, classes, iou_threshold=0.45, merge_threshold=0.2
     返回:
         保留的边界框索引列表, 融合后的边界框列表, 融合后的置信度, 融合后的类别
     """
-    import torchvision.ops as ops
+
     
     if len(boxes) == 0:
         return [], [], [], []
@@ -150,133 +150,6 @@ def enhanced_nms(boxes, scores, classes, iou_threshold=0.45, merge_threshold=0.2
     # 返回原始索引和融合后的结果
     return keep_indices, np.array(merged_boxes), np.array(merged_scores), np.array(merged_classes)
 # 修改draw_the_box函数以使用NMS
-
-def draw_the_box(image, boxes, nms_threshold=0.45):
-    """在图像上绘制边界框，使用NMS减少重复框"""
-    if isinstance(image, torch.Tensor):
-        image = image.cpu().numpy()
-    
-    # 转换为OpenCV可处理的格式
-    if image.dtype != np.uint8:
-        image = (image * 255).astype(np.uint8)
-    
-    # 确保图像是3通道的
-    if len(image.shape) == 2:
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    elif len(image.shape) == 3 and image.shape[0] == 3:
-        image = np.transpose(image, (1, 2, 0))
-    
-    # 获取图像尺寸
-    h, w = image.shape[:2]
-    
-    # 打印边界框形状和示例值，帮助调试
-    print(f"边界框形状: {boxes.shape}")
-    if boxes.size > 0 and len(boxes.shape) >= 3:
-        print(f"网格[0,0]内容: {boxes[0, 0, :]}") 
-    
-    try:
-        S_h, S_w = boxes.shape[:2]
-        detection_count = 0
-        confidence_threshold = 0.9
-        
-        # 收集所有有效框的数据用于NMS
-        all_boxes = []  # 格式: [x1, y1, x2, y2]
-        all_scores = []  # 置信度
-        all_classes = []  # 类别
-        all_metadata = []  # 存储类别概率等其他信息
-        
-        # 计算每个网格单元的尺寸
-        cell_w = w / S_w
-        cell_h = h / S_h
-
-        # 第一步：收集所有可能的框
-        for i in range(S_h):
-            for j in range(S_w):
-                class_probs = boxes[i, j, :5]  # 前5个是类别概率
-                x = boxes[i, j, 5]  # x坐标在第6个位置
-                y = boxes[i, j, 6]  # y坐标在第7个位置
-                w_box = boxes[i, j, 7]  # 宽度在第8个位置
-                h_box = boxes[i, j, 8]  # 高度在第9个位置
-                confidence = boxes[i, j, 9]  # 置信度在第10个位置
-                
-                if confidence > confidence_threshold:
-                    # 坐标转换
-                    cx = (x + j) * cell_w
-                    cy = (y + i) * cell_h
-                    box_w = w_box * w
-                    box_h = h_box * h
-                    
-                    # 计算左上和右下坐标
-                    x1 = max(0, int(cx - box_w/2))
-                    y1 = max(0, int(cy - box_h/2))
-                    x2 = min(w-1, int(cx + box_w/2))
-                    y2 = min(h-1, int(cy + box_h/2))
-                    
-                    # 确定类别
-                    class_idx = np.argmax(class_probs) + 1  # 因为类别从1开始
-                    class_prob = class_probs[class_idx-1]
-                    
-                    # 保存框信息
-                    all_boxes.append([x1, y1, x2, y2])
-                    all_scores.append(confidence)
-                    all_classes.append(class_idx)
-                    all_metadata.append({
-                        'class_prob': class_prob,
-                        'class_idx': class_idx
-                    })
-        
-        print(f"检测到 {len(all_boxes)} 个初始框")
-        
-        # 应用增强版NMS
-        if len(all_boxes) > 0:
-            keep_indices, merged_boxes, merged_scores, merged_classes = enhanced_nms(
-                all_boxes, all_scores, all_classes, 
-                iou_threshold=0.3,  # 传统NMS阈值
-                merge_threshold=0.2  # 框融合阈值
-            )
-            
-            print(f"融合后剩余 {len(merged_boxes)} 个框")
-            
-            # 绘制融合后的框
-            for i in range(len(merged_boxes)):
-                detection_count += 1
-                x1, y1, x2, y2 = [int(c) for c in merged_boxes[i]]
-                class_idx = merged_classes[i]
-                confidence = merged_scores[i]
-                
-                # 根据类别选择颜色
-                color = (0, 255, 0)  # 默认绿色
-                if class_idx == 1:
-                    color = (255, 0, 0)  # Car - 蓝色
-                elif class_idx == 2:
-                    color = (0, 0, 255)  # Pedestrian - 红色
-                elif class_idx == 3:
-                    color = (255, 255, 0)  # Bicyclist - 青色
-                elif class_idx == 4:
-                    color = (255, 0, 255)  # MotorcycleScooter - 紫色
-                elif class_idx == 5:
-                    color = (0, 255, 255)  # Truck_Bus - 黄色
-                
-                # 绘制边界框
-                cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
-                
-                # 添加类别标签
-                class_prob = 1.0  # 默认值
-                if i < len(keep_indices) and keep_indices[i] < len(all_metadata):
-                    class_prob = all_metadata[keep_indices[i]]['class_prob']
-                
-                label = f"C{class_idx}: {class_prob:.2f} Conf:{confidence:.2f}"
-                cv2.putText(image, label, (x1, y1-10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-        
-        print(f"绘制了 {detection_count} 个边界框")
-    
-    except Exception as e:
-        print(f"绘制边界框时出错: {str(e)}")
-        import traceback
-        traceback.print_exc()
-    
-    return image
 
 # 创建保存结果的目录
 os.makedirs('results/evaluation', exist_ok=True)
