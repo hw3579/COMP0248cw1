@@ -17,7 +17,10 @@ import math
 # 在文件开头的导入部分添加
 import datetime
 from model import ResNetHead, ASPP, DeepLabV3PlusDecoder, ConvBlock, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead, TotalDeepLabV3Plus, StageBlockmid, StageBlock4_2
-
+import platform
+from torch.amp import autocast, GradScaler
+from utils import segmentation_to_yolov3_1, yolo_loss, compute_iou_yolo
+import os
 
 def compute_iou(pred, labels, num_classes=6):
     """
@@ -66,10 +69,6 @@ def test_compute_iou():
     print(iou_dict)
     print(mean_iou)
 
-import platform
-from torch.amp import autocast, GradScaler
-from utils import segmentation_to_yolov3_1, yolo_loss, compute_iou_yolo
-import os
 
 # 计算类别权重
 
@@ -169,9 +168,6 @@ class FocalLoss(nn.Module):
             return loss
 
 if __name__ == "__main__":
-    # backbone_test()
-    # aspp_test()
-    # deeplabv3plus_test()
     #test_compute_iou()
 
 
@@ -349,7 +345,7 @@ if __name__ == "__main__":
             best_epoch = epoch
             counter = 0
             # 保存最佳模型
-            torch.save(model, 'results/deeplabmodelfullfinal.pth')
+            torch.save(model, 'results/deeplabmodelfullfinal_interrupted.pth')
         else:
             # 只有在达到最小训练轮数后才增加早停计数器
             if epoch >= min_epochs_before_earlystop:

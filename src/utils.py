@@ -2,41 +2,342 @@
 import torch
 import numpy as np
 import cv2
-
+import torchvision.ops as ops
+import math
+from torch.nn import functional as F
 
 # from dataloader import Comp0249Dataset
 
-def draw_the_box(image, pred_label):
-    '''
-    input: image - the image to draw the box on
-            pred_label - the predicted label (RGB image) (H, W, C) PIL image
-    output: image - the image with the box drawn on it (H, W)
-    '''
-    H, W, _ = image.shape
-    box_mask = np.zeros((5, H, W), dtype=np.uint8)
+def draw_the_box(image, boxes, nms_threshold=0.45):
+    """在图像上绘制边界框，使用NMS减少重复框"""
+    if isinstance(image, torch.Tensor):
+        image = image.cpu().numpy()
+    
+    # 转换为OpenCV可处理的格式
+    if image.dtype != np.uint8:
+        image = (image * 255).astype(np.uint8)
+    
+    # 确保图像是3通道的
+    if len(image.shape) == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    elif len(image.shape) == 3 and image.shape[0] == 3:
+        image = np.transpose(image, (1, 2, 0))
+    
+    # 获取图像尺寸
+    h, w = image.shape[:2]
+    
+    # 打印边界框形状和示例值，帮助调试
+    print(f"边界框形状: {boxes.shape}")
+    if boxes.size > 0 and len(boxes.shape) >= 3:
+        print(f"网格[0,0]内容: {boxes[0, 0, :]}") 
+    
+    try:
+        S_h, S_w = boxes.shape[:2]
+        detection_count = 0
+        confidence_threshold = 0.3
+        
+        # 收集所有有效框的数据用于NMS
+        all_boxes = []  # 格式: [x1, y1, x2, y2]
+        all_scores = []  # 置信度
+        all_classes = []  # 类别
+        all_metadata = []  # 存储类别概率等其他信息
+        
+        # 计算每个网格单元的尺寸
+        cell_w = w / S_w
+        cell_h = h / S_h
 
-    for i in range(5):
-        # 得到当前类别的掩码，类型为 bool
-        mask = (pred_label == i)
-        # 如果该类别没有像素，则跳过
-        if np.count_nonzero(mask) == 0:
-            continue
-
-        # 获得该类别像素的行和列索引
-        rows, cols = np.where(mask)
-        top = np.min(rows)
-        bottom = np.max(rows)
-        left = np.min(cols)
-        right = np.max(cols)
-
-        # 保证 image 内存连续
-        image = np.ascontiguousarray(image)
-        # 绘制矩形框
-        cv2.rectangle(image, (left, top), (right, bottom), (0, 25*i, 0), 1)
-
+        # 第一步：收集所有可能的框
+        for i in range(S_h):
+            for j in range(S_w):
+                class_probs = boxes[i, j, :5]  # 前5个是类别概率
+                x = boxes[i, j, 5]  # x坐标在第6个位置
+                y = boxes[i, j, 6]  # y坐标在第7个位置
+                w_box = boxes[i, j, 7]  # 宽度在第8个位置
+                h_box = boxes[i, j, 8]  # 高度在第9个位置
+                confidence = boxes[i, j, 9]  # 置信度在第10个位置
+                
+                if confidence > confidence_threshold:
+                    # 坐标转换
+                    cx = (x + j) * cell_w
+                    cy = (y + i) * cell_h
+                    box_w = w_box * w
+                    box_h = h_box * h
+                    
+                    # 计算左上和右下坐标
+                    x1 = max(0, int(cx - box_w/2))
+                    y1 = max(0, int(cy - box_h/2))
+                    x2 = min(w-1, int(cx + box_w/2))
+                    y2 = min(h-1, int(cy + box_h/2))
+                    
+                    # 确定类别
+                    class_idx = np.argmax(class_probs) + 1  # 因为类别从1开始
+                    class_prob = class_probs[class_idx-1]
+                    
+                    # 保存框信息
+                    all_boxes.append([x1, y1, x2, y2])
+                    all_scores.append(confidence)
+                    all_classes.append(class_idx)
+                    all_metadata.append({
+                        'class_prob': class_prob,
+                        'class_idx': class_idx
+                    })
+        
+        print(f"检测到 {len(all_boxes)} 个初始框")
+        
+        # 应用增强版NMS
+        if len(all_boxes) > 0:
+            keep_indices, merged_boxes, merged_scores, merged_classes = enhanced_nms(
+                all_boxes, all_scores, all_classes, 
+                iou_threshold=0.5,  # 传统NMS阈值
+                merge_threshold=0.3  # 框融合阈值
+            )
+            
+            print(f"融合后剩余 {len(merged_boxes)} 个框")
+            
+            # 绘制融合后的框
+            for i in range(len(merged_boxes)):
+                detection_count += 1
+                x1, y1, x2, y2 = [int(c) for c in merged_boxes[i]]
+                class_idx = merged_classes[i]
+                confidence = merged_scores[i]
+                
+                # 根据类别选择颜色
+                color = (0, 255, 0)  # 默认绿色
+                if class_idx == 1:
+                    color = (255, 0, 0)  # Car - 蓝色
+                elif class_idx == 2:
+                    color = (0, 0, 255)  # Pedestrian - 红色
+                elif class_idx == 3:
+                    color = (255, 255, 0)  # Bicyclist - 青色
+                elif class_idx == 4:
+                    color = (255, 0, 255)  # MotorcycleScooter - 紫色
+                elif class_idx == 5:
+                    color = (0, 255, 255)  # Truck_Bus - 黄色
+                
+                # 绘制边界框
+                cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
+                
+                # 添加类别标签
+                class_prob = 0.0
+                if len(keep_indices) > 0:
+                    # 如果是融合框，取最高的类别概率
+                    orig_indices = keep_indices[i] if isinstance(keep_indices[i], list) else [keep_indices[i]]
+                    probs = [all_metadata[idx]['class_prob'] for idx in orig_indices if idx < len(all_metadata)]
+                    class_prob = max(probs) if probs else 0.0
+                
+                # 在框上标记是否为融合框
+                is_merged = "merged" if isinstance(keep_indices[i], list) and len(keep_indices[i]) > 1 else ""
+                label = f"{is_merged} C{class_idx}: {class_prob:.2f} Conf:{confidence:.2f}"
+                cv2.putText(image, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        
+        print(f"绘制了 {detection_count} 个边界框")
+    
+    except Exception as e:
+        print(f"绘制边界框时出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+    
     return image
 
+def enhanced_nms(boxes, scores, classes, iou_threshold=0.45, merge_threshold=0.25, distance_threshold=0):
+    """
+    增强版NMS：应用标准NMS后，对仍然重叠的框进行融合
+    
+    参数:
+        boxes: 边界框坐标 [x1, y1, x2, y2] 的列表
+        scores: 每个边界框的置信度
+        classes: 每个边界框的类别
+        iou_threshold: 标准NMS的IoU阈值
+        merge_threshold: 框融合的IoU阈值
+    
+    返回:
+        保留的边界框索引列表, 融合后的边界框列表, 融合后的置信度, 融合后的类别
+    """
 
+    
+    if len(boxes) == 0:
+        return [], [], [], []
+    
+    # 转换为numpy数组
+    boxes = np.array(boxes)
+    scores = np.array(scores)
+    classes = np.array(classes)
+    
+    # 按类别分组进行NMS
+    keep_indices = []
+    kept_indices_map = {}  # 为了正确追踪原始索引
+    unique_classes = np.unique(classes)
+    
+    # 标准NMS处理
+    for cls in unique_classes:
+        cls_indices = np.where(classes == cls)[0]
+        if len(cls_indices) == 0:
+            continue
+            
+        cls_boxes = boxes[cls_indices]
+        cls_scores = scores[cls_indices]
+        
+        # 使用torchvision的nms函数
+        cls_boxes_tensor = torch.tensor(cls_boxes, dtype=torch.float32)
+        cls_scores_tensor = torch.tensor(cls_scores, dtype=torch.float32)
+        keep_tensor = ops.nms(cls_boxes_tensor, cls_scores_tensor, iou_threshold)
+        
+        keep_cls = [cls_indices[i] for i in keep_tensor.cpu().numpy()]
+        for i, idx in enumerate(keep_cls):
+            kept_indices_map[len(keep_indices) + i] = idx  # 记录索引映射
+        keep_indices.extend(keep_cls)
+
+        print(f"NMS后保留了{len(keep_indices)}个框")
+    
+    # 没有框或只有一个框时直接返回
+    if len(keep_indices) <= 1:
+        return keep_indices, boxes[keep_indices] if keep_indices else [], scores[keep_indices] if keep_indices else [], classes[keep_indices] if keep_indices else []
+    
+    # 处理NMS后的框，查找仍有重叠的框
+    kept_boxes = boxes[keep_indices]
+    kept_scores = scores[keep_indices]
+    kept_classes = classes[keep_indices]
+    
+    # 计算IoU矩阵
+    def calculate_iou(box1, box2):
+        """
+        计算两个矩形框的 IoU（Intersection over Union），
+        自动处理坐标顺序问题
+        
+        :param box1: (x1, y1, x2, y2)
+        :param box2: (x1, y1, x2, y2)
+        :return: IoU 值（0~1）
+        """
+        # 解析并修正 box1 的坐标，确保 x1<x2, y1<y2
+        x1_1, y1_1, x2_1, y2_1 = box1
+        if x1_1 > x2_1:
+            x1_1, x2_1 = x2_1, x1_1
+        if y1_1 > y2_1:
+            y1_1, y2_1 = y2_1, y1_1
+        
+        # 解析并修正 box2 的坐标，确保 x1<x2, y1<y2
+        x1_2, y1_2, x2_2, y2_2 = box2
+        if x1_2 > x2_2:
+            x1_2, x2_2 = x2_2, x1_2
+        if y1_2 > y2_2:
+            y1_2, y2_2 = y2_2, y1_2
+        
+        # 打印修正后的坐标，便于调试
+        print(f"修正后的框1: [{x1_1}, {y1_1}, {x2_1}, {y2_1}]")
+        print(f"修正后的框2: [{x1_2}, {y1_2}, {x2_2}, {y2_2}]")
+    
+        # 计算交集坐标（交集的左上角 & 右下角）
+        ix1 = max(x1_1, x1_2)
+        iy1 = max(y1_1, y1_2)
+        ix2 = min(x2_1, x2_2)
+        iy2 = min(y2_1, y2_2)
+    
+        # 计算交集区域的宽度和高度
+        iw = max(0, ix2 - ix1)  # 防止负数
+        ih = max(0, iy2 - iy1)
+    
+        # 交集面积
+        intersection_area = iw * ih
+    
+        # 计算 box1 和 box2 的面积
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+    
+        # 计算并集面积（Union = A + B - Intersection）
+        union_area = area1 + area2 - intersection_area
+    
+        # 计算 IoU，防止除以 0
+        iou = intersection_area / union_area if union_area > 0 else 0
+        
+        # 打印计算结果，便于调试
+        print(f"交集面积: {intersection_area}, 并集面积: {union_area}, IoU: {iou:.4f}")
+    
+        return iou
+    
+    # 创建标记数组，标记已经被融合的框
+    is_merged = np.zeros(len(kept_boxes), dtype=bool)
+    merged_boxes = []
+    merged_scores = []
+    merged_classes = []
+    merged_indices = []  # 跟踪每个合并框对应的原始索引
+    merge_count = 0
+
+      # 框融合
+    for i in range(len(kept_boxes)):
+        if is_merged[i]:
+            continue
+            
+        # 找到与当前框重叠的所有框
+        current_box = kept_boxes[i]
+        current_score = kept_scores[i]
+        current_class = kept_classes[i]
+        
+        # 当前框的中心点
+        cx1 = (current_box[0] + current_box[2]) / 2
+        cy1 = (current_box[1] + current_box[3]) / 2
+
+        overlaps = []
+        for j in range(len(kept_boxes)):
+            if i != j and not is_merged[j] and kept_classes[j] == current_class:
+                # 计算IoU
+                iou = calculate_iou(current_box, kept_boxes[j])
+                
+                # 计算两个框的中心点距离
+                other_box = kept_boxes[j]
+                cx2 = (other_box[0] + other_box[2]) / 2
+                cy2 = (other_box[1] + other_box[3]) / 2
+                distance = np.sqrt((cx1 - cx2)**2 + (cy1 - cy2)**2)
+                
+                # 打印所有调试信息 
+                print(f"框{i}与框{j}的IoU={iou:.5f}, 距离={distance:.1f}px")
+                
+                # 两种条件之一满足就融合：IoU足够大或距离足够近
+                if iou > merge_threshold or distance < distance_threshold:
+                    overlaps.append(j)
+                    print(f"将融合框{j} - IoU={iou:.5f}, 距离={distance:.1f}px")
+        
+        # 如果有重叠框，融合它们
+        if overlaps:
+            merge_count += 1
+            print(f"发现融合机会: 框{i}与{len(overlaps)}个框({overlaps})重叠")
+            # 标记所有要融合的框
+            is_merged[i] = True
+            for j in overlaps:
+                is_merged[j] = True
+                
+            # 收集所有要融合的框和对应的原始索引
+            indices_to_merge = [keep_indices[i]] + [keep_indices[j] for j in overlaps]
+            merged_indices.append(indices_to_merge)
+            
+            # 融合框逻辑保持不变...
+            boxes_to_merge = [current_box] + [kept_boxes[j] for j in overlaps]
+            scores_to_merge = [current_score] + [kept_scores[j] for j in overlaps]
+            
+            # 融合框：取最小x1,y1和最大x2,y2
+            x1 = min(box[0] for box in boxes_to_merge)
+            y1 = min(box[1] for box in boxes_to_merge)
+            x2 = max(box[2] for box in boxes_to_merge)
+            y2 = max(box[3] for box in boxes_to_merge)
+            
+            # 计算融合框的平均置信度
+            avg_score = sum(scores_to_merge) / len(scores_to_merge)
+            
+            # 添加融合后的框
+            merged_boxes.append([x1, y1, x2, y2])
+            merged_scores.append(avg_score)
+            merged_classes.append(current_class)
+        elif not is_merged[i]:
+            # 如果当前框没有被融合，直接添加
+            merged_boxes.append(current_box)
+            merged_scores.append(current_score)
+            merged_classes.append(current_class)
+            merged_indices.append([keep_indices[i]])  # 单个框的原始索引
+            is_merged[i] = True
+    
+    print(f"NMS后剩余{len(keep_indices)}个框，找到{merge_count}次融合机会，融合后剩余{len(merged_boxes)}个框")
+    
+    # 返回新版本的索引和结果
+    return merged_indices, np.array(merged_boxes), np.array(merged_scores), np.array(merged_classes)
 
 def segmentation_to_yolov3_1(label, Sx, Sy, num_classes=20, B=2, scale=1): # 重载
     """
@@ -102,10 +403,7 @@ def segmentation_to_yolov3_1(label, Sx, Sy, num_classes=20, B=2, scale=1): # 重
     # 转换回 torch.Tensor
     return torch.from_numpy(yolo_label)
 
-import math
 
-
-from torch.nn import functional as F
 
 def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noobj=0.5, gamma=2.0, alpha=0.25, imbalanced_mode=False):
     """修正后的YOLO损失函数计算，支持不平衡数据处理模式
@@ -338,3 +636,183 @@ def compute_iou_yolo(output_yolo, labels_yolo):
         mean_iou = torch.tensor(0.0, device=output_yolo.device)
     
     return mean_iou.item(), accuracy.item()
+
+
+def calculate_precision_recall(pred_boxes, true_boxes, iou_threshold=0.5, num_classes=5):
+    """
+    计算不同类别的精度和召回率
+    
+    Args:
+        pred_boxes: 形状为[grid_h, grid_w, 预测框数量*5+类别数]的预测框数组
+        true_boxes: 形状为[grid_h, grid_w, 预测框数量*5+类别数]的真实框数组
+        iou_threshold: IoU阈值，默认为0.5
+        num_classes: 类别数量（不包括背景）
+        
+    Returns:
+        precision_dict: 每个类别的精度
+        recall_dict: 每个类别的召回率
+        ap_dict: 每个类别的平均精度
+    """
+    # 预处理预测框和真实框格式
+    # 假设格式为[grid_h, grid_w, B*5+C]
+    # 其中B是每个网格预测的框数，C是类别数
+    grid_h, grid_w = pred_boxes.shape[0:2]
+    B = 1  # 每个网格预测框数量
+    C = num_classes  # 类别数
+    
+    # 初始化结果字典
+    all_predictions = []
+    all_ground_truths = []
+    
+    # 遍历所有网格，收集预测框和真实框
+    for h in range(grid_h):
+        for w in range(grid_w):
+            # 提取预测值
+            pred_data = pred_boxes[h, w]
+            true_data = true_boxes[h, w]
+            
+            # 提取类别置信度（预测）
+            pred_class_confs = pred_data[5:5+C]
+            pred_class = np.argmax(pred_class_confs)
+            pred_conf = pred_data[4]  # 框置信度
+            total_conf = pred_conf * pred_class_confs[pred_class]  # 总置信度
+            
+            # 检查是否有对象（根据真实框）
+            true_class_confs = true_data[5:5+C]
+            true_class = np.argmax(true_class_confs) if np.max(true_class_confs) > 0 else -1
+            
+            if total_conf > 0.01:  # 只考虑置信度高于阈值的预测框
+                # 收集预测框信息[x,y,w,h,conf,class_id]
+                box_info = np.concatenate([pred_data[0:4], [total_conf], [pred_class]])
+                all_predictions.append(box_info)
+            
+            if true_class >= 0:  # 有真实对象
+                # 收集真实框信息[x,y,w,h,1,class_id]
+                box_info = np.concatenate([true_data[0:4], [1.0], [true_class]])
+                all_ground_truths.append(box_info)
+    
+    return all_predictions, all_ground_truths
+
+def compute_ap_from_matches(all_predictions, all_ground_truths, iou_thresholds=[0.5], num_classes=5):
+    """
+    基于匹配的检测框计算AP
+    
+    Args:
+        all_predictions: 所有预测框列表，每个元素为[x,y,w,h,conf,class_id]
+        all_ground_truths: 所有真实框列表，每个元素为[x,y,w,h,1,class_id]
+        iou_thresholds: IoU阈值列表
+        num_classes: 类别数量
+        
+    Returns:
+        ap_dict: 不同IoU阈值下每个类别的AP值
+    """
+    # 将预测框按置信度排序
+    if len(all_predictions) == 0:
+        return {}, {}, {}
+    
+    all_predictions = np.array(all_predictions)
+    if len(all_predictions) > 0:
+        # 按置信度降序排列
+        all_predictions = all_predictions[np.argsort(-all_predictions[:, 4])]
+    
+    all_ground_truths = np.array(all_ground_truths) if len(all_ground_truths) > 0 else np.array([])
+    
+    # 初始化结果
+    ap_dict = {th: {} for th in iou_thresholds}
+    recall_dict = {th: {} for th in iou_thresholds}
+    precision_dict = {th: {} for th in iou_thresholds}
+    
+    # 对每个类别和IoU阈值计算AP
+    for cls in range(num_classes):
+        for iou_threshold in iou_thresholds:
+            # 筛选属于当前类别的预测框和真实框
+            cls_predictions = all_predictions[all_predictions[:, 5] == cls] if len(all_predictions) > 0 else []
+            cls_ground_truths = all_ground_truths[all_ground_truths[:, 5] == cls] if len(all_ground_truths) > 0 else []
+            
+            # 初始化精度和召回率计算
+            tp = np.zeros(len(cls_predictions))
+            fp = np.zeros(len(cls_predictions))
+            
+            # 标记已匹配的真实框
+            gt_matched = np.zeros(len(cls_ground_truths), dtype=bool)
+            
+            # 计算每个预测框是TP还是FP
+            for pred_idx, pred_box in enumerate(cls_predictions):
+                # 计算与所有真实框的IoU
+                if len(cls_ground_truths) > 0:
+                    ious = bbox_iou_batch(pred_box[:4], cls_ground_truths[:, :4])
+                    max_iou = np.max(ious)
+                    max_idx = np.argmax(ious)
+                    
+                    if max_iou >= iou_threshold and not gt_matched[max_idx]:
+                        tp[pred_idx] = 1
+                        gt_matched[max_idx] = True
+                    else:
+                        fp[pred_idx] = 1
+                else:
+                    fp[pred_idx] = 1
+            
+            # 累计TP和FP
+            tp_cumsum = np.cumsum(tp)
+            fp_cumsum = np.cumsum(fp)
+            
+            # 计算精度和召回率
+            precision = tp_cumsum / (tp_cumsum + fp_cumsum + 1e-10)
+            recall = tp_cumsum / (len(cls_ground_truths) + 1e-10)
+            
+            # 计算AP（精度-召回率曲线下面积）
+            if len(precision) > 0:
+                # 添加(0,1)点，确保精度-召回率曲线从(0,1)开始
+                precision = np.concatenate(([1], precision))
+                recall = np.concatenate(([0], recall))
+                
+                # 计算PR曲线下面积
+                ap = np.trapz(precision, recall)
+            else:
+                ap = 0.0
+            
+            # 保存结果
+            ap_dict[iou_threshold][cls] = ap
+            precision_dict[iou_threshold][cls] = precision
+            recall_dict[iou_threshold][cls] = recall
+    
+    return ap_dict, precision_dict, recall_dict
+
+def bbox_iou_batch(box1, box2):
+    """
+    计算两组框之间的IoU
+    
+    Args:
+        box1: 单个框[x,y,w,h]
+        box2: 框数组[N,4]，每行是[x,y,w,h]
+        
+    Returns:
+        IoU数组[N]
+    """
+    # 转换为左上右下格式
+    b1_x1, b1_y1 = box1[0] - box1[2]/2, box1[1] - box1[3]/2
+    b1_x2, b1_y2 = box1[0] + box1[2]/2, box1[1] + box1[3]/2
+    
+    b2_x1 = box2[:, 0] - box2[:, 2]/2
+    b2_y1 = box2[:, 1] - box2[:, 3]/2
+    b2_x2 = box2[:, 0] + box2[:, 2]/2
+    b2_y2 = box2[:, 1] + box2[:, 3]/2
+    
+    # 计算交集面积
+    inter_x1 = np.maximum(b1_x1, b2_x1)
+    inter_y1 = np.maximum(b1_y1, b2_y1)
+    inter_x2 = np.minimum(b1_x2, b2_x2)
+    inter_y2 = np.minimum(b1_y2, b2_y2)
+    
+    inter_w = np.maximum(0, inter_x2 - inter_x1)
+    inter_h = np.maximum(0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    
+    # 计算两个框的面积
+    b1_area = (b1_x2 - b1_x1) * (b1_y2 - b1_y1)
+    b2_area = (b2_x2 - b2_x1) * (b2_y2 - b2_y1)
+    
+    # 计算IoU
+    iou = inter_area / (b1_area + b2_area - inter_area + 1e-10)
+    
+    return iou

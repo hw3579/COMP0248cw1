@@ -349,6 +349,9 @@ def totalDeepLabV3Plus_test():
     print(output[0].shape, output[1].shape)
 
 if __name__ == "__main__":
+    # backbone_test()
+    # aspp_test()
+    # deeplabv3plus_test()
     totalDeepLabV3Plus_test() # pass
     # test_resnethead() # pass
     pass

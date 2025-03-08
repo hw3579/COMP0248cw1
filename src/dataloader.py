@@ -14,11 +14,8 @@ import matplotlib.pyplot as plt
 import os
 import pandas as pd
 
-# from utils import segmentation_to_yolo
-# from utils import segmentation_to_yolov3,
-from utils import segmentation_to_yolov3_1
-# from utils import draw_the_yolo_label
 
+from utils import segmentation_to_yolov3_1
 import random
 import os.path as osp
 import json
@@ -256,49 +253,30 @@ if __name__ == '__main__':
 
         '''
 
+    # 在测试部分的代码修改
     if test_dataloader:
         dataset = Comp0249Dataset('data/CamVid', "train", scale=1)
-        dataset.getitem(0)
-        # print(dataset[0])
-        fig, pl = plt.subplots(2, 2)
-        pl[0, 0].imshow(dataset[0][0].permute(1, 2, 0))
-        pl[0, 1].imshow(dataset[0][1][0], cmap='gray')
-        print(dataset[0][1][1].shape)
+        image, labels = dataset[0]  # 正确解包返回值
+        
+        # 获取分割标签和YOLO格式标签
+        binary_label = labels[0]
+        yolo_label = labels[1]  # 获取YOLO格式标签
+        
+        # 将图像转为可显示格式
+        image_display = image.permute(1, 2, 0).numpy()
+        
+        # 创建图形
+        fig, pl = plt.subplots(1, 2, figsize=(12, 5))
+        
+        # 在原始图像上绘制边界框(使用eval_dv3中的高级函数)
+        img_with_pred_boxes = draw_the_box(image.cpu().permute(1,2,0).numpy(), yolo_label.cpu().numpy()) # 3, 720, 960 15, 20, 10
+        pl[0].imshow(img_with_pred_boxes)
+        pl[0].set_title("original image with bounding boxes")
+        
+        # 显示语义分割标签
+        pl[1].imshow(binary_label, cmap='tab20')  # 使用tab20更好地区分类别
+        pl[1].set_title("segmentation label")
 
-        # dataset_yolov1 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
-        # dataset_yolov1.getitem(0)
-        # image_yolov1 = dataset_yolov1[0][0].permute(1, 2, 0)
-        # label_yolov1 = dataset_yolov1[0][1]
-        # pl[1, 0].imshow(draw_the_yolo_label(image_yolov1, label_yolov1))
-
-        # dataset_yolov3 = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov3")
-        # dataset_yolov3.getitem(0)
-        # image_yolov3 = dataset_yolov3[0][0].permute(1, 2, 0)
-        # label_yolov3 = dataset_yolov3[0][1][2]
-        # pl[1, 1].imshow(draw_the_yolo_label(image_yolov3, label_yolov3))
-
+        plt.tight_layout()
         plt.savefig('fig/data.png')
         plt.show()
-
-
-
-
-
-        # test_dataset = Comp0249Dataset('data/CamVid', "train")
-        # image, label = test_dataset.getitem(0)
-        # image = image.numpy().transpose(1, 2, 0).astype(np.uint8)
-        # label = label.numpy()
-        # image = draw_the_box(image, label)
-        # # automatically resize window
-        # cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-        # cv2.namedWindow('label', cv2.WINDOW_NORMAL)
-        # # large the image
-        # h, w, _ = image.shape
-        # cv2.resizeWindow('image', 960, 720)
-        # cv2.resizeWindow('label', 960, 720)
-        # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        # cv2.imshow('image', image)
-        # cv2.imshow('label', label*20)
-
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
