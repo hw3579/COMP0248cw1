@@ -1,7 +1,6 @@
 from matplotlib import pyplot as plt
 import seaborn as sns
 import numpy as np
-
 from utils import draw_the_box
 
 def visualize_results(results, segmentation_metrics, class_names, 
@@ -21,7 +20,7 @@ def visualize_results(results, segmentation_metrics, class_names,
     plt.close()
 
     # 2. Segmentation results visualization
-    num_samples = min(8, len(all_images))
+    num_samples = min(2, len(all_images))
     plt.figure(figsize=(15, 5*num_samples))
 
     for i in range(num_samples):
@@ -93,29 +92,4 @@ def visualize_results(results, segmentation_metrics, class_names,
     plt.legend()
     plt.tight_layout()
     plt.savefig('results/evaluation/class_performance.png')
-    plt.close()
-
-    # 5. Object detection AP visualization
-    classes_det = list(class_names.values())[1:]  # Skip background class
-    ap_values_50 = [results['ap_dict'][0.5].get(i-1, 0) for i in range(1, 6)] if 0.5 in results['ap_dict'] else [0]*5
-    ap_values_75 = [results['ap_dict'][0.75].get(i-1, 0) for i in range(1, 6)] if 0.75 in results['ap_dict'] else [0]*5
-    
-    x = np.arange(len(classes_det))
-    width = 0.35
-    
-    fig_ap, ax_ap = plt.subplots(figsize=(12, 6))
-    rects1 = ax_ap.bar(x - width/2, ap_values_50, width, label='AP@.5')
-    rects2 = ax_ap.bar(x + width/2, ap_values_75, width, label='AP@.75')
-    
-    ax_ap.set_ylabel('AP')
-    ax_ap.set_title('AP by Class')
-    ax_ap.set_xticks(x)
-    ax_ap.set_xticklabels(classes_det)
-    ax_ap.legend()
-    
-    ax_ap.bar_label(rects1, padding=3, fmt='%.3f')
-    ax_ap.bar_label(rects2, padding=3, fmt='%.3f')
-    
-    fig_ap.tight_layout()
-    plt.savefig('results/evaluation/detection_ap.png')
     plt.close()

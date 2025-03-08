@@ -88,8 +88,8 @@ def draw_the_box(image, boxes, nms_threshold=0.45):
         if len(all_boxes) > 0:
             keep_indices, merged_boxes, merged_scores, merged_classes = enhanced_nms(
                 all_boxes, all_scores, all_classes, 
-                iou_threshold=0.5,  # 传统NMS阈值
-                merge_threshold=0.3  # 框融合阈值
+                iou_threshold=0.2,  # 传统NMS阈值
+                merge_threshold=0.01  # 框融合阈值
             )
             
             print(f"融合后剩余 {len(merged_boxes)} 个框")
@@ -139,7 +139,7 @@ def draw_the_box(image, boxes, nms_threshold=0.45):
     
     return image
 
-def enhanced_nms(boxes, scores, classes, iou_threshold=0.45, merge_threshold=0.25, distance_threshold=0):
+def enhanced_nms(boxes, scores, classes, iou_threshold=0.45, merge_threshold=0.25, distance_threshold=50):
     """
     增强版NMS：应用标准NMS后，对仍然重叠的框进行融合
     
@@ -453,8 +453,8 @@ def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noo
         class_weights = torch.ones(C, device=predictions.device)
     
     # 1. 只对有目标的网格计算类别损失(使用Focal Loss)
-    bce_loss = F.mse_loss(pred_class, target_class, reduction='none')
-    pt = torch.exp(-bce_loss)
+    mse_loss = F.mse_loss(pred_class, target_class, reduction='none')
+    pt = torch.exp(-mse_loss)
     
     # 区分正负样本的alpha
     pos_mask = (target_class > 0.5)
@@ -474,7 +474,7 @@ def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noo
     
     # 只对有目标的网格计算类别损失
     obj_expanded = obj_mask.unsqueeze(-1).expand_as(pred_class)
-    focal_loss = focal_weight * bce_loss * obj_expanded
+    focal_loss = focal_weight * mse_loss * obj_expanded
     class_loss = focal_loss.sum()
     
     # 2. 只对有目标的网格计算坐标损失
@@ -496,8 +496,8 @@ def yolo_loss(predictions, targets, Sx, Sy, B=1, C=5, lambda_coord=5, lambda_noo
     
     # 宽高损失使用平方根变换
     wh_loss = F.mse_loss(
-        torch.sqrt(torch.abs(pred_wh) + 1e-6) * obj_expanded_wh, 
-        torch.sqrt(torch.abs(target_wh) + 1e-6) * obj_expanded_wh, 
+        pred_wh * obj_expanded_wh, 
+        target_wh * obj_expanded_wh, 
         reduction='mean'
     )
     
@@ -637,182 +637,3 @@ def compute_iou_yolo(output_yolo, labels_yolo):
     
     return mean_iou.item(), accuracy.item()
 
-
-def calculate_precision_recall(pred_boxes, true_boxes, iou_threshold=0.5, num_classes=5):
-    """
-    计算不同类别的精度和召回率
-    
-    Args:
-        pred_boxes: 形状为[grid_h, grid_w, 预测框数量*5+类别数]的预测框数组
-        true_boxes: 形状为[grid_h, grid_w, 预测框数量*5+类别数]的真实框数组
-        iou_threshold: IoU阈值，默认为0.5
-        num_classes: 类别数量（不包括背景）
-        
-    Returns:
-        precision_dict: 每个类别的精度
-        recall_dict: 每个类别的召回率
-        ap_dict: 每个类别的平均精度
-    """
-    # 预处理预测框和真实框格式
-    # 假设格式为[grid_h, grid_w, B*5+C]
-    # 其中B是每个网格预测的框数，C是类别数
-    grid_h, grid_w = pred_boxes.shape[0:2]
-    B = 1  # 每个网格预测框数量
-    C = num_classes  # 类别数
-    
-    # 初始化结果字典
-    all_predictions = []
-    all_ground_truths = []
-    
-    # 遍历所有网格，收集预测框和真实框
-    for h in range(grid_h):
-        for w in range(grid_w):
-            # 提取预测值
-            pred_data = pred_boxes[h, w]
-            true_data = true_boxes[h, w]
-            
-            # 提取类别置信度（预测）
-            pred_class_confs = pred_data[5:5+C]
-            pred_class = np.argmax(pred_class_confs)
-            pred_conf = pred_data[4]  # 框置信度
-            total_conf = pred_conf * pred_class_confs[pred_class]  # 总置信度
-            
-            # 检查是否有对象（根据真实框）
-            true_class_confs = true_data[5:5+C]
-            true_class = np.argmax(true_class_confs) if np.max(true_class_confs) > 0 else -1
-            
-            if total_conf > 0.01:  # 只考虑置信度高于阈值的预测框
-                # 收集预测框信息[x,y,w,h,conf,class_id]
-                box_info = np.concatenate([pred_data[0:4], [total_conf], [pred_class]])
-                all_predictions.append(box_info)
-            
-            if true_class >= 0:  # 有真实对象
-                # 收集真实框信息[x,y,w,h,1,class_id]
-                box_info = np.concatenate([true_data[0:4], [1.0], [true_class]])
-                all_ground_truths.append(box_info)
-    
-    return all_predictions, all_ground_truths
-
-def compute_ap_from_matches(all_predictions, all_ground_truths, iou_thresholds=[0.5], num_classes=5):
-    """
-    基于匹配的检测框计算AP
-    
-    Args:
-        all_predictions: 所有预测框列表，每个元素为[x,y,w,h,conf,class_id]
-        all_ground_truths: 所有真实框列表，每个元素为[x,y,w,h,1,class_id]
-        iou_thresholds: IoU阈值列表
-        num_classes: 类别数量
-        
-    Returns:
-        ap_dict: 不同IoU阈值下每个类别的AP值
-    """
-    # 将预测框按置信度排序
-    if len(all_predictions) == 0:
-        return {}, {}, {}
-    
-    all_predictions = np.array(all_predictions)
-    if len(all_predictions) > 0:
-        # 按置信度降序排列
-        all_predictions = all_predictions[np.argsort(-all_predictions[:, 4])]
-    
-    all_ground_truths = np.array(all_ground_truths) if len(all_ground_truths) > 0 else np.array([])
-    
-    # 初始化结果
-    ap_dict = {th: {} for th in iou_thresholds}
-    recall_dict = {th: {} for th in iou_thresholds}
-    precision_dict = {th: {} for th in iou_thresholds}
-    
-    # 对每个类别和IoU阈值计算AP
-    for cls in range(num_classes):
-        for iou_threshold in iou_thresholds:
-            # 筛选属于当前类别的预测框和真实框
-            cls_predictions = all_predictions[all_predictions[:, 5] == cls] if len(all_predictions) > 0 else []
-            cls_ground_truths = all_ground_truths[all_ground_truths[:, 5] == cls] if len(all_ground_truths) > 0 else []
-            
-            # 初始化精度和召回率计算
-            tp = np.zeros(len(cls_predictions))
-            fp = np.zeros(len(cls_predictions))
-            
-            # 标记已匹配的真实框
-            gt_matched = np.zeros(len(cls_ground_truths), dtype=bool)
-            
-            # 计算每个预测框是TP还是FP
-            for pred_idx, pred_box in enumerate(cls_predictions):
-                # 计算与所有真实框的IoU
-                if len(cls_ground_truths) > 0:
-                    ious = bbox_iou_batch(pred_box[:4], cls_ground_truths[:, :4])
-                    max_iou = np.max(ious)
-                    max_idx = np.argmax(ious)
-                    
-                    if max_iou >= iou_threshold and not gt_matched[max_idx]:
-                        tp[pred_idx] = 1
-                        gt_matched[max_idx] = True
-                    else:
-                        fp[pred_idx] = 1
-                else:
-                    fp[pred_idx] = 1
-            
-            # 累计TP和FP
-            tp_cumsum = np.cumsum(tp)
-            fp_cumsum = np.cumsum(fp)
-            
-            # 计算精度和召回率
-            precision = tp_cumsum / (tp_cumsum + fp_cumsum + 1e-10)
-            recall = tp_cumsum / (len(cls_ground_truths) + 1e-10)
-            
-            # 计算AP（精度-召回率曲线下面积）
-            if len(precision) > 0:
-                # 添加(0,1)点，确保精度-召回率曲线从(0,1)开始
-                precision = np.concatenate(([1], precision))
-                recall = np.concatenate(([0], recall))
-                
-                # 计算PR曲线下面积
-                ap = np.trapz(precision, recall)
-            else:
-                ap = 0.0
-            
-            # 保存结果
-            ap_dict[iou_threshold][cls] = ap
-            precision_dict[iou_threshold][cls] = precision
-            recall_dict[iou_threshold][cls] = recall
-    
-    return ap_dict, precision_dict, recall_dict
-
-def bbox_iou_batch(box1, box2):
-    """
-    计算两组框之间的IoU
-    
-    Args:
-        box1: 单个框[x,y,w,h]
-        box2: 框数组[N,4]，每行是[x,y,w,h]
-        
-    Returns:
-        IoU数组[N]
-    """
-    # 转换为左上右下格式
-    b1_x1, b1_y1 = box1[0] - box1[2]/2, box1[1] - box1[3]/2
-    b1_x2, b1_y2 = box1[0] + box1[2]/2, box1[1] + box1[3]/2
-    
-    b2_x1 = box2[:, 0] - box2[:, 2]/2
-    b2_y1 = box2[:, 1] - box2[:, 3]/2
-    b2_x2 = box2[:, 0] + box2[:, 2]/2
-    b2_y2 = box2[:, 1] + box2[:, 3]/2
-    
-    # 计算交集面积
-    inter_x1 = np.maximum(b1_x1, b2_x1)
-    inter_y1 = np.maximum(b1_y1, b2_y1)
-    inter_x2 = np.minimum(b1_x2, b2_x2)
-    inter_y2 = np.minimum(b1_y2, b2_y2)
-    
-    inter_w = np.maximum(0, inter_x2 - inter_x1)
-    inter_h = np.maximum(0, inter_y2 - inter_y1)
-    inter_area = inter_w * inter_h
-    
-    # 计算两个框的面积
-    b1_area = (b1_x2 - b1_x1) * (b1_y2 - b1_y1)
-    b2_area = (b2_x2 - b2_x1) * (b2_y2 - b2_y1)
-    
-    # 计算IoU
-    iou = inter_area / (b1_area + b2_area - inter_area + 1e-10)
-    
-    return iou

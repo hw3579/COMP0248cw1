@@ -15,26 +15,14 @@ from collections import defaultdict
 from train_deeplabv3 import compute_iou, FocalLoss, calculate_class_weights
 from model import TotalDeepLabV3Plus
 from dataloader import Comp0249Dataset
-from utils import compute_iou_yolo, draw_the_box, calculate_precision_recall, compute_ap_from_matches
+from utils import compute_iou_yolo, draw_the_box
+from eval_func import initialize_metrics, calculate_final_metrics, print_results, save_results_to_csv
+from visualize import visualize_results
 
-def initialize_metrics():
-    """初始化评估指标字典"""
-    segmentation_metrics = {
-        'total_loss': [],
-        'mean_iou': [],
-        'class_iou': defaultdict(list),
-        'confusion_matrix': np.zeros((6, 6), dtype=np.int64)
-    }
-
-    detection_metrics = {
-        'yolo_iou': [],
-        'class_accuracy': defaultdict(list),
-        'detection_count': defaultdict(int),
-        'all_predictions': [],
-        'all_ground_truths': []
-    }
-    
-    return segmentation_metrics, detection_metrics
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
+import json
+import tempfile
 
 def evaluate_model(model, test_loader, criterion, device, class_names):
     """模型评估的主循环"""
@@ -46,6 +34,11 @@ def evaluate_model(model, test_loader, criterion, device, class_names):
     all_pred_masks = []
     all_pred_boxes = []
     all_true_boxes = []
+    per_image_predictions = []
+    per_image_ground_truths = []
+    total_image_predictions = []
+    total_image_ground_truths = []
+    
     
     print("开始评估...")
     with torch.no_grad():
@@ -56,6 +49,7 @@ def evaluate_model(model, test_loader, criterion, device, class_names):
             
             # 模型推理
             pred_segment, pred_yolo = model(images)
+            # pred_yolo = labels_yolo.clone()
             
             # 计算分割指标
             seg_loss = criterion(pred_segment, labels_segment)
@@ -84,7 +78,8 @@ def evaluate_model(model, test_loader, criterion, device, class_names):
                 segmentation_metrics['confusion_matrix'] += cm
             
             # 计算目标检测指标
-            try:
+            # try:
+            if True:
                 yolo_iou, class_acc = compute_iou_yolo(pred_yolo, labels_yolo)
                 detection_metrics['yolo_iou'].append(yolo_iou)
                 
@@ -100,20 +95,14 @@ def evaluate_model(model, test_loader, criterion, device, class_names):
 
                 # 收集用于计算mAP的预测和真实框
                 for b in range(pred_yolo.size(0)):
-                    preds, gts = calculate_precision_recall(
-                        pred_yolo[b].cpu().numpy(), 
-                        labels_yolo[b].cpu().numpy(), 
-                        iou_threshold=0.5, 
-                        num_classes=5
-                    )
-                    detection_metrics['all_predictions'].extend(preds)
-                    detection_metrics['all_ground_truths'].extend(gts)
-            except Exception as e:
-                print(f"计算目标检测指标出错: {str(e)}")
-                print(f"错误类型: {type(e).__name__}")
-                import traceback
-                traceback.print_exc()
-            
+                    img = images[b].cpu().numpy().transpose(1, 2, 0).astype(np.uint8)
+                    true_mask = labels_segment[b].cpu().numpy()
+                    pred_mask = pred_labels[b].cpu().numpy()
+                    
+                    per_image_ground_truths.append(labels_yolo[b].cpu().numpy())
+                    per_image_predictions.append(pred_yolo[b].cpu().numpy())
+                  
+
             # 保存样本用于可视化(最多保存10个batch)
             if idx < 10:
                 for b in range(min(images.size(0), 2)):  # 每个batch最多保存2张图
@@ -126,117 +115,18 @@ def evaluate_model(model, test_loader, criterion, device, class_names):
                     all_pred_masks.append(pred_mask)
                     all_true_boxes.append(labels_yolo[b].cpu().numpy())
                     all_pred_boxes.append(pred_yolo[b].cpu().numpy())
-    
+
+        
+
+
     return (
         segmentation_metrics, detection_metrics, 
         all_images, all_true_masks, all_pred_masks, 
-        all_true_boxes, all_pred_boxes
+        all_true_boxes, all_pred_boxes,
+        per_image_predictions, per_image_ground_truths  # 新增返回值
     )
 
-def calculate_final_metrics(segmentation_metrics, detection_metrics, class_names):
-    """计算最终指标，包括平均值和mAP"""
-    # 计算平均指标
-    avg_loss = np.mean(segmentation_metrics['total_loss'])
-    avg_miou = np.mean(segmentation_metrics['mean_iou'])
-    avg_yolo_iou = np.mean(detection_metrics['yolo_iou'])
 
-    # 计算每个类别的平均IoU
-    class_iou_avg = {}
-    for cls in range(6):
-        if segmentation_metrics['class_iou'][cls]:
-            class_iou_avg[cls] = np.mean(segmentation_metrics['class_iou'][cls])
-        else:
-            class_iou_avg[cls] = float('nan')
-
-    # 计算每个类别的检测准确率
-    class_det_acc = {}
-    for cls in range(1, 6):  # 跳过背景类
-        if detection_metrics['class_accuracy'][cls]:
-            class_det_acc[cls] = np.mean(detection_metrics['class_accuracy'][cls])
-        else:
-            class_det_acc[cls] = float('nan')
-
-    # 计算mAP (COCO格式评估指标)
-    iou_thresholds = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-    ap_dict, precision_dict, recall_dict = compute_ap_from_matches(
-        detection_metrics['all_predictions'],
-        detection_metrics['all_ground_truths'],
-        iou_thresholds=iou_thresholds,
-        num_classes=5
-    )
-
-    # 计算每个IoU阈值下的mAP
-    map_50 = np.mean([ap_dict[0.5][cls] for cls in range(5) if cls in ap_dict[0.5]]) if 0.5 in ap_dict and ap_dict[0.5] else 0
-    map_75 = np.mean([ap_dict[0.75][cls] for cls in range(5) if cls in ap_dict[0.75]]) if 0.75 in ap_dict and ap_dict[0.75] else 0
-    
-    # 计算mAP@[0.5:0.95] (COCO标准)
-    maps = []
-    for thresh in iou_thresholds:
-        if thresh in ap_dict:
-            cls_aps = [ap_dict[thresh][cls] for cls in range(5) if cls in ap_dict[thresh]]
-            if cls_aps:
-                maps.append(np.mean(cls_aps))
-    map_all = np.mean(maps) if maps else 0
-    
-    results = {
-        'avg_loss': avg_loss,
-        'avg_miou': avg_miou,
-        'avg_yolo_iou': avg_yolo_iou,
-        'class_iou_avg': class_iou_avg,
-        'class_det_acc': class_det_acc,
-        'ap_dict': ap_dict,
-        'map_50': map_50,
-        'map_75': map_75,
-        'map_all': map_all
-    }
-    
-    return results
-
-def print_results(results, class_names, detection_metrics):
-    """打印评估结果"""
-    print("\n=== 分割评估结果 ===")
-    print(f"平均损失: {results['avg_loss']:.4f}")
-    print(f"平均mIoU: {results['avg_miou']:.4f}")
-    print("各类别IoU:")
-    for cls in range(6):
-        class_name = class_names[cls]
-        iou_val = results['class_iou_avg'][cls] if cls in results['class_iou_avg'] else float('nan')
-        print(f"  - {class_name}: {iou_val:.4f}")
-
-    print("\n=== 目标检测评估结果 ===")
-    print(f"平均YOLO IoU: {results['avg_yolo_iou']:.4f}")
-    print(f"mAP@.5: {results['map_50']:.4f}")
-    print(f"mAP@.75: {results['map_75']:.4f}")
-    print(f"mAP@[.5:.95]: {results['map_all']:.4f}")
-    print("各类别检测准确率:")
-    for cls in range(1, 6):  # 跳过背景类
-        class_name = class_names[cls]
-        acc_val = results['class_det_acc'][cls] if cls in results['class_det_acc'] else float('nan')
-        det_count = detection_metrics['detection_count'][cls]
-        ap_50 = results['ap_dict'][0.5][cls-1] if 0.5 in results['ap_dict'] and cls-1 in results['ap_dict'][0.5] else float('nan')
-        print(f"  - {class_name}: 准确率={acc_val:.4f}, AP@.5={ap_50:.4f} (检测到{det_count}个)")
-
-def save_results_to_csv(results, class_names):
-    """保存结果到CSV文件"""
-    # 保存详细评估结果
-    results_df = pd.DataFrame({
-        'Class': [class_names[i] for i in range(6)],
-        'Segmentation_IoU': [results['class_iou_avg'].get(i, float('nan')) for i in range(6)],
-        'Detection_Accuracy': [results['class_det_acc'].get(i, float('nan')) for i in range(1, 6)] + [float('nan')]
-    })
-    results_df.to_csv('results/evaluation/detailed_results.csv', index=False)
-    
-    # 保存目标检测AP结果
-    detection_df = pd.DataFrame({
-        'Class': [class_names[i] for i in range(1, 6)],
-        'Segmentation_IoU': [results['class_iou_avg'].get(i, float('nan')) for i in range(1, 6)],
-        'Detection_Accuracy': [results['class_det_acc'].get(i, float('nan')) for i in range(1, 6)],
-        'AP@.5': [results['ap_dict'][0.5].get(i-1, float('nan')) for i in range(1, 6)] if 0.5 in results['ap_dict'] else [float('nan')]*5,
-        'AP@.75': [results['ap_dict'][0.75].get(i-1, float('nan')) for i in range(1, 6)] if 0.75 in results['ap_dict'] else [float('nan')]*5
-    })
-    detection_df.to_csv('results/evaluation/detection_results.csv', index=False)
-
-from visualize import visualize_results
 def main():
     # 创建保存结果的目录
     os.makedirs('results/evaluation', exist_ok=True)
@@ -273,10 +163,11 @@ def main():
     # 评估模型
     evaluation_results = evaluate_model(model, test_loader, criterion, device, class_names)
     segmentation_metrics, detection_metrics = evaluation_results[:2]
-    all_images, all_true_masks, all_pred_masks, all_true_boxes, all_pred_boxes = evaluation_results[2:]
+    all_images, all_true_masks, all_pred_masks, all_true_boxes, all_pred_boxes = evaluation_results[2:7]
+    per_image_predictions, per_image_ground_truths = evaluation_results[7:9]
 
     # 计算最终指标
-    results = calculate_final_metrics(segmentation_metrics, detection_metrics, class_names)
+    results = calculate_final_metrics(segmentation_metrics, detection_metrics, class_names, per_image_predictions, per_image_ground_truths)
     
     # 打印结果
     print_results(results, class_names, detection_metrics)
@@ -289,9 +180,6 @@ def main():
                       all_images, all_true_masks, all_pred_masks, 
                       all_true_boxes, all_pred_boxes)
     
-    print(f"\nmAP结果总结：\nmAP@.5={results['map_50']:.4f}, "
-          f"mAP@.75={results['map_75']:.4f}, mAP@[.5:.95]={results['map_all']:.4f}")
-    print("\n评估完成！结果已保存到results/evaluation/目录")
 
 if __name__ == "__main__":
     main()

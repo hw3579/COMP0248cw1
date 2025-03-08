@@ -211,8 +211,8 @@ if __name__ == "__main__":
             train_loader = DataLoader(train_dataset, batch_size=10, shuffle=True, num_workers=10)
 
 
-    # model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
-    model = torch.load('results/deeplabmodelfullfinal_interrupted.pth', weights_only=False)
+    model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
+    # model = torch.load('results/deeplabmodelfullfinal_interrupted.pth', weights_only=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     # from torchsummary import summary
@@ -331,8 +331,8 @@ if __name__ == "__main__":
 
         # early stopping
         patience = 10  # 连续多少个epoch没改善就停止
-        min_delta = 1e-4  # 改善的最小阈值
-        min_epochs_before_earlystop = 75  # 至少训练这么多epoch才开始检查早停
+        min_delta = 1e-5  # 改善的最小阈值
+        min_epochs_before_earlystop = 100  # 至少训练这么多epoch才开始检查早停
 
         # 初始化早停所需变量
         if epoch == 0:
