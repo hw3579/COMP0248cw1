@@ -68,44 +68,44 @@ class Comp0249Dataset(Dataset):
         self.target_transform = target_transform
         self.version = version
 
-        # 新增缓存相关参数
+        # Cache directory
         self.use_cache = use_cache
         self.cache_dir = osp.join(dir, 'cache')
         os.makedirs(self.cache_dir, exist_ok=True)
         self.rare_class_cache_file = osp.join(self.cache_dir, f'{classes}_rare_classes_{scale}.json')
         self.class_dist_cache_file = osp.join(self.cache_dir, f'{classes}_class_dist_{scale}.json')
         
-        # 加载或创建少数类缓存
+        # load or create cache for rare class images
         self.rare_class_images = self._load_or_create_rare_class_cache()
     
     def _load_or_create_rare_class_cache(self):
-        """加载或创建少数类图像缓存"""
+        """Load or create cache for rare class images"""
         if self.use_cache and osp.exists(self.rare_class_cache_file):
-            print(f"正在加载少数类缓存: {self.rare_class_cache_file}")
+            print(f"Loading rare class cache: {self.rare_class_cache_file}")
             with open(self.rare_class_cache_file, 'r') as f:
                 return json.load(f)
         else:
-            print("正在分析数据集以识别少数类图像...")
+            print("Analyzing dataset to identify rare class images...")
             rare_class_images = {}
-            for idx in tqdm(range(len(self.images)), desc="分析少数类"):
+            for idx in tqdm(range(len(self.images)), desc="Analyzing rare classes"):
                 image_name = self.images[idx]
                 image_path = osp.join(self.dir, image_name)
                 label_path = osp.join(self.dir_labels, self.images_labels[idx])
                 
-                # 读取并处理标签以确定类别
+                # Read and process label to determine classes
                 label = read_image(label_path)
                 _, h, w = label.shape
                 resize = transforms.Resize((h // self.scale, w // self.scale))
                 label = resize(label)
                 label_gray = torch.zeros(h // self.scale, w // self.scale, dtype=torch.uint8)
                 
-                # 应用类别映射
+                # Apply class mapping
                 for item in self.class_dict:
                     color = torch.tensor(item[1:4], dtype=label.dtype).view(3, 1, 1)
                     mask = (label == color).all(dim=0)
                     label_gray[mask] = item[0]
                 
-                # 检查是否包含少数类
+                # Check if it contains rare classes
                 unique_classes = torch.unique(label_gray).tolist()
                 rare_classes = [cls for cls in unique_classes if cls in [4, 5]]
                 
@@ -115,14 +115,13 @@ class Comp0249Dataset(Dataset):
                         "all_classes": unique_classes
                     }
             
-            # 保存缓存
+            # Save cache
             if self.use_cache:
                 with open(self.rare_class_cache_file, 'w') as f:
                     json.dump(rare_class_images, f)
-                print(f"已保存少数类缓存: {self.rare_class_cache_file}")
+                print(f"Saved rare class cache: {self.rare_class_cache_file}")
             
             return rare_class_images
-
     def __len__(self):
         return len(self.images_labels)
 
@@ -154,26 +153,28 @@ class Comp0249Dataset(Dataset):
             #         if (label[:, hx , wx] == torch.Tensor(item[1:4])).to(label.dtype).all():
             #             label_gray[hx , wx] = item[0]
 
-            # item[0] 为类别编号，item[1:4] 为颜色，比如 [64,128,64]
+            
+            # high performance code
             color = torch.tensor(item[1:4], dtype=label.dtype).view(3, 1, 1)
-            # 比较整个 label 得到 (3, h, w) 的布尔张量，all(dim=0) 得到 (h, w) 掩码
+            
             mask = (label == color).all(dim=0)
-            # 对满足条件的像素赋予类别编号
+            
             label_gray[mask] = item[0]    
 
-        # 检查是否包含少数类
+            ##############################################################
+
+        # check if the image contains rare classes
         unique_classes = torch.unique(label_gray)
         contains_rare_class = any(cls in [4, 5] for cls in unique_classes)  
         
-        # 使用缓存判断是否为少数类样本
+        # use cache to determine if the image contains rare classes
         image_name = self.images[idx]
         contains_rare_class = image_name in self.rare_class_images
         
-        # 对包含少数类的样本进行更强的数据增强
+        # using data augmentation for rare class images
         if contains_rare_class:
-            # print(f"应用少数类增强: {image_name}, 类别: {self.rare_class_images[image_name]['rare_classes']}")
             
-            # 数据增强逻辑保持不变
+            # use seed to ensure the same transformation for image and label
             seed = torch.randint(0, 2**32, (1,)).item()
             
             torch.manual_seed(seed)
@@ -232,9 +233,9 @@ if __name__ == '__main__':
             dataset = Comp0249Dataset('data/CamVid', "train", scale=1, version="yolov1")
             train_loader = DataLoader(dataset, batch_size=32, num_workers=num_workers)
             start = time.time()
-            for _ in range(5):  # 运行5个 batch
+            for _ in range(5):  # run for 5 iterations
                 for batch in train_loader:
-                    pass  # 仅测试数据加载速度
+                    pass  # only  measure the time for loading
             end = time.time()
             return end - start
 
@@ -253,28 +254,28 @@ if __name__ == '__main__':
 
         '''
 
-    # 在测试部分的代码修改
+    # 
     if test_dataloader:
         dataset = Comp0249Dataset('data/CamVid', "train", scale=1)
-        image, labels = dataset[0]  # 正确解包返回值
+        image, labels = dataset[0]  
         
-        # 获取分割标签和YOLO格式标签
+
         binary_label = labels[0]
-        yolo_label = labels[1]  # 获取YOLO格式标签
+        yolo_label = labels[1]  
         
-        # 将图像转为可显示格式
+        # torch.Tensor -> numpy.ndarray
         image_display = image.permute(1, 2, 0).numpy()
         
-        # 创建图形
+       
         fig, pl = plt.subplots(1, 2, figsize=(12, 5))
         
-        # 在原始图像上绘制边界框(使用eval_dv3中的高级函数)
+
         img_with_pred_boxes = draw_the_box(image.cpu().permute(1,2,0).numpy(), yolo_label.cpu().numpy()) # 3, 720, 960 15, 20, 10
         pl[0].imshow(img_with_pred_boxes)
         pl[0].set_title("original image with bounding boxes")
         
-        # 显示语义分割标签
-        pl[1].imshow(binary_label, cmap='tab20')  # 使用tab20更好地区分类别
+        # show segmentation label
+        pl[1].imshow(binary_label, cmap='tab20')  
         pl[1].set_title("segmentation label")
 
         plt.tight_layout()

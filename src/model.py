@@ -10,14 +10,10 @@ import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
 
-from dataloader import Comp0249Dataset
-from tqdm import tqdm
-import math
 
-# 在文件开头的导入部分添加
-import datetime
 
-# 定义 ResNet-like 结构
+
+# define resnet head
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, mid_channels, out_channels, stride=1, is_res=False):
         super(ConvBlock, self).__init__()
@@ -53,14 +49,14 @@ class ConvBlock(nn.Module):
         
         out = self.conv3(out)
         out = self.bn3(out)
-        # 注意这里没有ReLU
+       
         
         if self.is_res:
             identity = self.conv_res(x)
             identity = self.bn_res(identity)
         
         out += identity
-        out = self.mix_relu(out)  # 只在残差连接后应用一次ReLU
+        out = self.mix_relu(out)  
         
         return out
 
@@ -250,30 +246,30 @@ class DeepLabV3PlusDecoder(nn.Module):
         self.num_classes = num_classes
         self.w = w
         self.h = h
-        # 3x3 卷积（减少通道数 + BN + ReLU）
+        # 3x3 conv (reduce channels + BN + ReLU)
         self.conv3x3 = nn.Sequential(
             nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True)
         )
 
-        # 1x1 卷积（将通道数变为类别数）
+        # 1x1 conv to num_classes
         self.classifier = nn.Conv2d(256, num_classes, kernel_size=1, stride=1)
 
     def forward(self, x):
         x = self.conv3x3(x)  # 60x60x256 -> 60x60x256
         x = self.classifier(x)  # 60x60x256 -> 60x60xnum_classes
         x = F.interpolate(x, size=(self.h, self.w), mode='bilinear', align_corners=True)
-        return x  # 输出分割结果 (480x480xnum_classes)
+        return x  # out (480x480xnum_classes)
 
 
 class YOLOHead(nn.Module):
     def __init__(self, in_channels, num_classes, Sx=None, Sy=None):
         super(YOLOHead, self).__init__()
-        self.C = num_classes - 1  # 不包括背景 
+        self.C = num_classes - 1  # not counting background
         self.B = 1
         
-        # 保持输入尺寸不变的卷积网络
+        # 
         self.conv1 = nn.Conv2d(in_channels, 1024, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm2d(1024)
         self.act1 = nn.LeakyReLU(0.1)
@@ -286,27 +282,27 @@ class YOLOHead(nn.Module):
         self.bn3 = nn.BatchNorm2d(256)
         self.act3 = nn.LeakyReLU(0.1)
         
-        # 输出层：保持空间维度不变，只改变通道数
+        # 
         self.conv_out = nn.Conv2d(256, self.C + self.B * 5, kernel_size=1)
         
-    def forward(self, x):  # 输入 2048×20×15
-        # 应用卷积层，逐层处理，保持空间维度不变
-        x = self.conv1(x)  # 输出 1024×20×15
+    def forward(self, x):  # in 2048×20×15
+        # 
+        x = self.conv1(x)  # out 1024×20×15
         x = self.bn1(x)
         x = self.act1(x)
         
-        x = self.conv2(x)  # 输出 512×20×15
+        x = self.conv2(x)  #  512×20×15
         x = self.bn2(x)
         x = self.act2(x)
         
-        x = self.conv3(x)  # 输出 256×20×15
+        x = self.conv3(x)  #  256×20×15
         x = self.bn3(x)
         x = self.act3(x)
         
-        x = self.conv_out(x)  # 输出 (C+B*5)×20×15
+        x = self.conv_out(x)  #  (C+B*5)×20×15
                 
-        # 调整通道顺序：[batch, channels, height, width] -> [batch, height, width, channels]
-        return x.permute(0, 2, 3, 1)  # 输出形状: [batch_size, 20, 15, C+B*5]
+        # [batch, channels, height, width] -> [batch, height, width, channels]
+        return x.permute(0, 2, 3, 1)  # out [batch_size, 20, 15, C+B*5]
 
 
 class TotalDeepLabV3Plus(nn.Module):
@@ -318,9 +314,12 @@ class TotalDeepLabV3Plus(nn.Module):
         self.yolo_head = YOLOHead(2048, num_classes, w/32, h/32)
 
     def forward(self, x):
+        """Forward pass through the model."""
+        # Get features from backbone
         x, x_yolo = self.backbone(x)
-        # batch, 2048, 30, 23
+        # Output size: batch, 2048, 30, 23
 
+        # Process features for segmentation and detection
         x_seg = self.aspp(x)    
         x_seg = self.decoder(x_seg)
         x_yolo = self.yolo_head(x_yolo)
@@ -328,30 +327,31 @@ class TotalDeepLabV3Plus(nn.Module):
         return x_seg, x_yolo
 
 def aspp_test():
+    """Test the ASPP module."""
     model = ASPP()
-    # print(model)
     random_tensor = torch.randn(1, 2048, 23, 30)
-    output = model(random_tensor) # 1, 512, 30, 23
+    output = model(random_tensor) # Output shape: 1, 512, 30, 23
     print(output.shape)
 
 
 def deeplabv3plus_test():
+    """Test the DeepLabV3+ decoder."""
     input_tensor = torch.randn(1, 256, 23, 30)
     decoder = DeepLabV3PlusDecoder(num_classes=6, w=input_tensor.shape[2], h=input_tensor.shape[3])
     output = decoder(input_tensor)
-    print(output.shape)  # 预期: torch.Size([1, 21, 480, 480])
+    print(output.shape)  # Expected: torch.Size([1, 21, 480, 480])
 
 def totalDeepLabV3Plus_test():
+    """Test the complete TotalDeepLabV3Plus model."""
     model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
-    # print(model)
     random_tensor = torch.randn(1, 3, 720, 960)
-    output = model(random_tensor) # 1, 21, 480, 480
+    output = model(random_tensor) # Output shapes for segmentation and detection
     print(output[0].shape, output[1].shape)
 
 if __name__ == "__main__":
     # backbone_test()
     # aspp_test()
     # deeplabv3plus_test()
-    totalDeepLabV3Plus_test() # pass
-    # test_resnethead() # pass
+    totalDeepLabV3Plus_test() # passed
+    # test_resnethead() # passed
     pass

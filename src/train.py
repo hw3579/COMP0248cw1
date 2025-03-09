@@ -14,7 +14,6 @@ from dataloader import Comp0249Dataset
 from tqdm import tqdm
 import math
 
-# 在文件开头的导入部分添加
 import datetime
 from model import ResNetHead, ASPP, DeepLabV3PlusDecoder, ConvBlock, StageBlock1, StageBlock2, StageBlock3, StageBlock4, YOLOHead, TotalDeepLabV3Plus, StageBlockmid, StageBlock4_2
 import platform
@@ -22,20 +21,64 @@ from torch.amp import autocast, GradScaler
 from utils import segmentation_to_yolov3_1, yolo_loss, compute_iou_yolo
 import os
 
+
+import json 
+
+def save_checkpoint(model, total_loss, total_acc, total_yolo_acc, epoch, best_loss, best_epoch, optimizer, reason="best"):
+    """Save checkpoint and training data
+    
+    Args:
+        model: The model to save
+        total_loss, total_acc, total_yolo_acc: Training history records
+        epoch: Current epoch
+        best_loss, best_epoch: Best performance records
+        optimizer: The optimizer
+        reason: Reason for saving, 'best'/'early_stop'/'interrupted'
+    
+    Returns:
+        tuple: (model_filename, data_filename)
+    """
+    # Generate timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Save model
+    model_filename = f'results/deeplabmodelfullfinal_{reason}.pth'
+    torch.save(model, model_filename)
+    
+    # Save training data
+    data = {
+        'loss': total_loss,
+        'accuracy': total_acc,
+        'yolo_accuracy': total_yolo_acc,  
+        'last_epoch': epoch,
+        'best_loss': best_loss,
+        'best_epoch': best_epoch,
+        'learning_rate': optimizer.param_groups[0]['lr'],
+        'save_time': timestamp,
+        'reason': reason
+    }
+    
+    # Save data to json file
+    data_filename = f'results/deeplabmodeldatafinal_{reason}_{timestamp}.json'
+    with open(data_filename, 'w') as f:
+        json.dump(data, f)
+    
+    return model_filename, data_filename
+
 def compute_iou(pred, labels, num_classes=6):
     """
-    计算两幅标签图的 IoU（每个类别计算 IoU，最后求平均）。
+    Calculate IoU between two label images (compute IoU for each class and average).
     
-    参数：
-        pred (Tensor): 模型预测值 (N, C, H, W)
-        labels (Tensor): 真实标签 (N, H, W)，值域 0 ~ num_classes-1
-        num_classes (int): 语义分割的类别数（包括背景）
+    Parameters:
+        pred (Tensor): Model predictions (N, C, H, W)
+        labels (Tensor): Ground truth labels (N, H, W), values 0 to num_classes-1
+        num_classes (int): Number of semantic segmentation classes (including background)
     
-    返回：
-        iou_dict (dict): 每个类别的 IoU 值
-        mean_iou (float): 平均 IoU
+    Returns:
+        iou_dict (dict): IoU value for each class
+        mean_iou (float): Average IoU
     """
-    # 将预测结果转换为类别标签
+    # Convert predictions to class labels
     pred = torch.argmax(pred, dim=1)  # (N, H, W)
 
     iou_dict = {}
@@ -46,21 +89,21 @@ def compute_iou(pred, labels, num_classes=6):
         union = ((pred == cls) | (labels == cls)).float().sum()
 
         if union == 0:
-            iou = torch.tensor(float('nan'))  # 该类在两幅图中都不存在
+            iou = torch.tensor(float('nan'))  # Class does not exist in either image
         else:
             iou = intersection / union
         
-        iou_dict[f'class_{cls}'] = iou#.item()
+        iou_dict[f'class_{cls}'] = iou
         if not torch.isnan(iou):
             iou_list.append(iou)
 
-    # 计算平均 IoU（忽略 NaN 类别）
+    # Calculate mean IoU (ignoring NaN classes)
     mean_iou = torch.tensor(iou_list).mean().item()
     
     return iou_dict, mean_iou
 
 def test_compute_iou():
-    # 生成两幅随机标签图
+    # Generate two random label images
     torch.manual_seed(0)
     label1 = torch.randint(0, 6, (1, 480, 480))
     label2 = torch.randint(0, 6, (1, 480, 480))
@@ -70,27 +113,25 @@ def test_compute_iou():
     print(mean_iou)
 
 
-# 计算类别权重
-
 def calculate_class_weights(dataset, use_cache=True):
-    """计算分割任务的类别权重，支持缓存"""
-    # 创建缓存目录
+    """Calculate class weights for segmentation tasks, with caching support"""
+    # Create cache directory
     cache_dir = 'data/CamVid/cache'
     os.makedirs(cache_dir, exist_ok=True)
     cache_file = os.path.join(cache_dir, 'class_weights.pth')
     
-    # 检查是否存在缓存
+    # Check if cache exists
     if use_cache and os.path.exists(cache_file):
-        print(f"从缓存加载类别权重: {cache_file}")
+        print(f"Loading class weights from cache: {cache_file}")
         class_weights = torch.load(cache_file)
-        print(f"加载的类别权重: {class_weights}")
+        print(f"Loaded class weights: {class_weights}")
         return class_weights
     
-    # 没有缓存，重新计算
-    print("计算类别权重...")
-    class_counts = {i: 0 for i in range(6)}  # 假设有6个类别（0-5）
+    # No cache, recalculate
+    print("Calculating class weights...")
+    class_counts = {i: 0 for i in range(6)}  # Assuming 6 classes (0-5)
     
-    for idx in tqdm(range(len(dataset)), desc="分析类别分布"):
+    for idx in tqdm(range(len(dataset)), desc="Analyzing class distribution"):
         _, [label, _] = dataset[idx]
         unique_classes, counts = torch.unique(label, return_counts=True)
         
@@ -98,107 +139,49 @@ def calculate_class_weights(dataset, use_cache=True):
             if cls in class_counts:
                 class_counts[cls] += count
     
-    print(f"类别分布: {class_counts}")
+    print(f"Class distribution: {class_counts}")
     
-    # 计算权重（少数类获得更高权重）
+    # Calculate weights (minority classes get higher weights)
     total_pixels = sum(class_counts.values())
-    class_weights = torch.ones(6)  # 假设6个类别
+    class_weights = torch.ones(6)  # Assuming 6 classes
     for cls, count in class_counts.items():
         if count > 0:
-            # 使用反比例权重并规范化
+            # Use inverse proportion weighting and normalize
             class_weights[cls] = total_pixels / (len(class_counts) * count)
     
-    # 归一化权重
+    # Normalize weights
     class_weights = class_weights / class_weights.sum() * len(class_counts)
-    print(f"类别权重: {class_weights}")
+    print(f"Class weights: {class_weights}")
     
-    # 保存缓存
+    # Save cache
     if use_cache:
         torch.save(class_weights, cache_file)
-        print(f"已保存类别权重缓存: {cache_file}")
+        print(f"Saved class weights cache: {cache_file}")
     
     return class_weights
 
-# 在文件顶部导入区添加这个类
-
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
-        """
-        Focal Loss 实现，用于语义分割
-        
-        参数:
-            alpha: 类别权重 (tensor)，形状为 (C,)
-            gamma: 聚焦参数，减少易分类样本的贡献
-            reduction: 'none'|'mean'|'sum'
-        """
-        super(FocalLoss, self).__init__()
-        self.gamma = gamma
-        self.alpha = alpha
-        self.reduction = reduction
-    
-    def forward(self, inputs, targets):
-        # inputs形状: [N, C, H, W]
-        # targets形状: [N, H, W]
-        
-        # 计算交叉熵损失 (无reduction)
-        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.alpha)
-        
-        # 获取概率预测
-        inputs_softmax = F.softmax(inputs, dim=1)
-        
-        # 创建one-hot编码的targets
-        targets_one_hot = F.one_hot(targets, num_classes=inputs.size(1))
-        targets_one_hot = targets_one_hot.permute(0, 3, 1, 2).float()  # [N, H, W, C] -> [N, C, H, W]
-        
-        # 计算目标类别的预测概率
-        pt = (inputs_softmax * targets_one_hot).sum(dim=1)  # [N, H, W]
-        
-        # 计算Focal Loss权重因子
-        focal_weight = (1 - pt) ** self.gamma
-        
-        # 应用Focal Loss权重
-        loss = focal_weight * ce_loss
-        
-        # 应用reduction
-        if self.reduction == 'mean':
-            return loss.mean()
-        elif self.reduction == 'sum':
-            return loss.sum()
-        else:  # 'none'
-            return loss
-
 if __name__ == "__main__":
-    #test_compute_iou()
-
-
-    # 在if __name__ == "__main__":之后、训练循环之前添加
-    # 检查并清除可能存在的退出标记文件
+    # Check for and remove existing exit flag file
     exit_file = "exit_training.txt"
     if os.path.exists(exit_file):
         os.remove(exit_file)
-    print(f"训练过程中，创建文件 '{exit_file}' 将保存当前模型并退出训练")
+    print(f"During training, creating file '{exit_file}' will save the current model and exit training")
 
-
-
-    # 定义图像增强策略
+    # Define image augmentation strategy
     transform = transforms.Compose([
-        # 将tensor转为PIL以应用transforms
         transforms.ToPILImage(),
-        # 随机水平翻转
         transforms.RandomHorizontalFlip(p=0.5),
-        # 随机调整亮度、对比度、饱和度、色调
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05),
-        # 随机旋转、平移和缩放
         transforms.RandomAffine(degrees=5, translate=(0.05, 0.05), scale=(0.95, 1.05)),
-        # 转回tensor
         transforms.ToTensor(),
     ])
 
-    # start training
+    # Start training
     is_use_autoscale = True
 
     train_dataset = Comp0249Dataset('data/CamVid', "train", scale=1, transform=None, target_transform=None)
 
+    # Configure dataloader according to platform and settings
     if is_use_autoscale:
         if platform.system() == 'Windows':
             train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=0, pin_memory=True)
@@ -211,25 +194,24 @@ if __name__ == "__main__":
             train_loader = DataLoader(train_dataset, batch_size=10, shuffle=True, num_workers=10)
 
 
-    model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
-    # model = torch.load('results/deeplabmodelfullfinal_interrupted.pth', weights_only=False)
+
+
+    # model = TotalDeepLabV3Plus(num_classes=6, w=960, h=720)
+
+
+
+    model = torch.load('results/deeplabmodelfullfinal_interrupted.pth', weights_only=False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-    # from torchsummary import summary
-    # print(summary(model, (3, 720, 960)))
 
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)  # 稍微提高初始学习率
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)  # Slightly increased initial learning rate
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
     total_loss = []
     total_acc = []
     num_epochs = 500
 
-    criterion = nn.CrossEntropyLoss()  # 默认会忽略不合法类别
-    # class_weights = calculate_class_weights(train_dataset)
-    # class_weights = class_weights.to(device)
-    # criterion = FocalLoss(alpha=class_weights, gamma=2.0)
-
+    criterion = nn.CrossEntropyLoss()  # Default will ignore invalid classes
     lambda_yolo = 0
 
     if is_use_autoscale:
@@ -240,7 +222,7 @@ if __name__ == "__main__":
         seg_loss_per_epoch = 0.0
         yolo_loss_per_epoch = 0.0
         acc_per_epoch = 0.0
-        yolo_acc_per_epoch = 0.0  # 新增YOLO准确率统计变量
+        yolo_acc_per_epoch = 0.0  # YOLO accuracy tracking variable
 
         for images, labels in tqdm(train_loader, desc="Batches"):
             images = images.to(device, dtype=torch.float32)
@@ -250,32 +232,27 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             if is_use_autoscale:
                 with autocast(device_type=str(device)):
-                    # 在训练循环中使用修改后的损失函数
+                    # Forward pass with modified loss function
                     pred, pred_yolo = model(images)
-
 
                     # pred, pred_yolo = images, labels_yolo
 
                     # b, h, w = labels_segment.size()
                     # num_classes = 6
                     # pred_segment = torch.zeros(b, num_classes, h, w, device=device)
-                    # # 为每个标签在对应位置设置高值(10.0)，模拟softmax前的logits
+                    
                     # for i in range(num_classes):
                     #     pred_segment[:, i, :, :] = (labels_segment == i).float() * 10.0
 
                     # pred = pred_segment
 
-
-
-
                     seg_loss = criterion(pred, labels_segment)
                     yolo_loss_val = yolo_loss(pred_yolo, labels_yolo, 8, 6, 1, 5, gamma=2.0, alpha=0.25)
 
                     lambda_yolo = seg_loss_per_epoch / (yolo_loss_per_epoch + 1e-8)
-
                     batch_total_loss = seg_loss + yolo_loss_val * lambda_yolo
                 
-                # 使用正确的损失进行缩放和反向传播
+                # Use correct loss for scaling and backpropagation
                 scaler.scale(batch_total_loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
@@ -285,32 +262,30 @@ if __name__ == "__main__":
                 yolo_loss_val = yolo_loss(pred_yolo, labels_yolo, 8, 6, 1, 5)
 
                 lambda_yolo = seg_loss_per_epoch / (yolo_loss_per_epoch + 1e-8)
-
                 batch_total_loss = seg_loss + yolo_loss_val * lambda_yolo
                 batch_total_loss.backward()
                 optimizer.step()
 
-            # 累积各类损失
+            # Accumulate losses
             loss_per_epoch += batch_total_loss.item()
             seg_loss_per_epoch += seg_loss.item()
             yolo_loss_per_epoch += yolo_loss_val.item()
 
-            # 计算准确率
+            # Calculate accuracy
             _, batch_acc = compute_iou(pred, labels_segment)
             acc_per_epoch += batch_acc
 
-                    # 添加：计算YOLO准确率
+            # Calculate YOLO accuracy
             with torch.no_grad():
                 batch_yolo_iou_, batch_yolo_iou = compute_iou_yolo(pred_yolo, labels_yolo)
                 yolo_acc_per_epoch += batch_yolo_iou
 
-        # 计算每个epoch的平均损失和准确率
+        # Calculate average losses and accuracies per epoch
         seg_loss_per_epoch /= len(train_loader)
         yolo_loss_per_epoch /= len(train_loader)
         loss_per_epoch /= len(train_loader)
         acc_per_epoch /= len(train_loader)
-        yolo_acc_per_epoch /= len(train_loader)  # 计算YOLO平均准确率
-
+        yolo_acc_per_epoch /= len(train_loader)
         
         print(f"segloss:{seg_loss_per_epoch:.4f}, yololoss:{yolo_loss_per_epoch:.4f}")
         print(f"Epoch: {epoch}, Loss: {loss_per_epoch:.4f}, Acc: {acc_per_epoch:.4f}, YOLO Class Acc: {yolo_acc_per_epoch:.4f}")
@@ -318,91 +293,58 @@ if __name__ == "__main__":
         total_loss.append(loss_per_epoch)
         total_acc.append(acc_per_epoch)
         
-
-        # 添加：记录YOLO准确率
+        # Record YOLO accuracy
         if 'total_yolo_acc' not in locals():
             total_yolo_acc = []
         total_yolo_acc.append(yolo_acc_per_epoch)
 
-
-        # 学习率调整
+        # Learning rate adjustment
         scheduler.step(loss_per_epoch)
 
+        # Early stopping configuration
+        patience = 10  # Number of epochs with no improvement before stopping
+        min_delta = 1e-5  # Minimum threshold for improvement
+        min_epochs_before_earlystop = 125  # Minimum epochs before checking early stopping
 
-        # early stopping
-        patience = 10  # 连续多少个epoch没改善就停止
-        min_delta = 1e-5  # 改善的最小阈值
-        min_epochs_before_earlystop = 100  # 至少训练这么多epoch才开始检查早停
-
-        # 初始化早停所需变量
+        # Initialize early stopping variables
+        # Initialize early stopping variables
         if epoch == 0:
             best_loss = loss_per_epoch
             best_epoch = 0
             counter = 0
-        # 判断是否有改善
+        # Check if loss has improved
         elif loss_per_epoch < best_loss - min_delta:
             best_loss = loss_per_epoch
             best_epoch = epoch
             counter = 0
-            # 保存最佳模型
-            torch.save(model, 'results/deeplabmodelfullfinal_interrupted.pth')
+            
+            model_filename, _ = save_checkpoint(model, total_loss, total_acc, total_yolo_acc, 
+                                            epoch, best_loss, best_epoch, optimizer, reason="best")
+            print(f"Saved best model: {model_filename}")
         else:
-            # 只有在达到最小训练轮数后才增加早停计数器
+            # Only increase counter after minimum training epochs
             if epoch >= min_epochs_before_earlystop:
                 counter += 1
                 print(f"Early stopping counter: {counter}/{patience} (active after {min_epochs_before_earlystop} epochs)")
             else:
                 print(f"Early stopping not active yet, will activate after {min_epochs_before_earlystop} epochs")
             
-        # 如果连续patience个epoch没有改善且已经过了最小训练轮数，停止训练
+        # If no improvement for 'patience' epochs and after minimum training epochs, stop training
         if counter >= patience and epoch >= min_epochs_before_earlystop:
             print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with loss {best_loss:.4f}")
+            model_filename, data_filename = save_checkpoint(model, total_loss, total_acc, total_yolo_acc, 
+                                                    epoch, best_loss, best_epoch, optimizer, reason="early_stop")
+            print(f"Saved early stopping data:\n- {model_filename}\n- {data_filename}")
             break
 
-
-
-
-        # 修改检测退出信号的代码段
+        # Check for exit signal
         if os.path.exists(exit_file):
-            print("\n检测到退出信号，正在保存模型和训练数据...")
+            print("\nExit signal detected, saving model and training data...")
             
-            # 生成时间戳
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            model_filename, data_filename = save_checkpoint(model, total_loss, total_acc, total_yolo_acc, 
+                                                    epoch, best_loss, best_epoch, optimizer, reason="interrupted")
             
-            # 保存当前模型（使用特殊名称和时间戳以避免覆盖）
-            model_filename = f'results/deeplabmodelfullfinal_interrupted.pth'
-            torch.save(model, model_filename)
-            
-            import json
-            # 在检测退出信号的代码段中修改data字典
-            data = {
-                'loss': total_loss,
-                'accuracy': total_acc,
-                'yolo_accuracy': total_yolo_acc,  # 添加YOLO准确率记录
-                'last_epoch': epoch,
-                'best_loss': best_loss,
-                'best_epoch': best_epoch,
-                'learning_rate': optimizer.param_groups[0]['lr'],
-                'interrupt_time': timestamp
-                }
-            
-            # 保存训练数据，同样使用时间戳
-            data_filename = f'results/deeplabmodeldatafinal_interrupted_{timestamp}.json'
-            with open(data_filename, 'w') as f:
-                json.dump(data, f)
-            
-            # 删除触发文件
             os.remove(exit_file)
-            print(f"保存完成，文件已保存为:\n- {model_filename}\n- {data_filename}")
-            print("训练已退出。")
+            print(f"Saved interrupted training data:\n- {model_filename}\n- {data_filename}")
+            print("Training exited")
             break
-
-    # 保存模型及训练指标
-    # torch.save(model, 'results/deeplabmodelfull3.5.pth')
-    # import json
-    # data = {
-    #     'loss': total_loss,
-    #     'accuracy': total_acc
-    # }
-    # with open('results/deeplabmodeldata3.5.json', 'w') as f:
-    #     json.dump(data, f)

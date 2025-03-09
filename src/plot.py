@@ -2,10 +2,10 @@ from matplotlib import pyplot as plt
 import numpy as np
 import json
 import math
-read_deeplabdata = 1
+read_deeplabdata = 0
 read_yolov1data = 0
 read_yolov3data = 0
-read_finaldeeplabdata = 0
+read_finaldeeplabdata = 1
 
 if read_deeplabdata:
 # 从 JSON 文件中读取数据
@@ -104,13 +104,14 @@ if read_yolov3data:
     plt.show()
 
 if read_finaldeeplabdata:
-    # 从 JSON 文件中读取数据
-    with open('results/deeplabmodeldatafinal.json', 'r') as f:
+    # Load data from first JSON file
+    with open('results/deeplabmodeldatafinal_interrupted_20250309_015854.json', 'r') as f:
         data = json.load(f)
 
     # 提取损失和准确率数据
     loss = np.array(data['loss'])
     accuracy = data['accuracy']
+
 
     # 创建一个新的图形
     plt.figure(figsize=(12, 6))
@@ -126,6 +127,7 @@ if read_finaldeeplabdata:
     # 绘制准确率曲线
     plt.subplot(1, 2, 2)
     plt.plot(accuracy, label='Accuracy', color='orange')
+    # plt.plot(yolo_acc, label='Yolo Accuracy', color='green')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
     plt.title('Training Accuracy')
@@ -133,4 +135,5 @@ if read_finaldeeplabdata:
 
     # 显示图形
     plt.tight_layout()
+    plt.savefig('results/training_results.png')
     plt.show()
