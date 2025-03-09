@@ -31,3 +31,6 @@ project_studentname/
 
 This project is released under the MIT License.
 
+
+The GitHub repository link: 
+{https://github.com/hw3579/COMP0248cw1}
