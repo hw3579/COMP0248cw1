@@ -22,6 +22,7 @@ project_studentname/
 │   ├── eval_func               # some functions for eval
 │   ├── visualize.py            # Visualization function for eval
 │   ├── utils.py                # Some training functions
+|   |—— model.py                # model file and some test function
 │
 ├── README.md                    # Setup/usage instructions
 ```
